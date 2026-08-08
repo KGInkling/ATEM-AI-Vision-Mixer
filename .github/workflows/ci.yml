@@ -1,0 +1,114 @@
+name: ci
+
+on:
+  pull_request:
+    branches:
+      - main
+  push:
+    branches:
+      - main
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  lint:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Check out the repository
+        uses: actions/checkout@v7
+
+      - name: Set up Python
+        uses: actions/setup-python@v7
+        with:
+          python-version: "3.11.9"
+          cache: pip
+          cache-dependency-path: .github/workflows/ci.yml
+
+      - name: Install lint tools
+        run: python -m pip install ruff
+
+      - name: Check lint rules
+        run: ruff check .
+
+      - name: Check formatting
+        run: ruff format --check .
+
+  test:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Check out the repository with full history
+        uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+
+      - name: Set up Python
+        uses: actions/setup-python@v7
+        with:
+          python-version: "3.11.9"
+          cache: pip
+          cache-dependency-path: .github/workflows/ci.yml
+
+      - name: Install test tools
+        run: |
+          python -m pip install pytest pytest-cov
+          if [ -f pyproject.toml ]; then
+            python -m pip install --editable .
+          fi
+
+      - name: Run the full test suite with coverage
+        run: |
+          if [ ! -d tests ]; then
+            if [ -d atem_ai_vision_mixer ]; then
+              echo "Application code exists, but the test suite is missing."
+              exit 1
+            fi
+
+            echo "::notice::No application code or tests exist yet; the bootstrap test job has nothing to run."
+            exit 0
+          fi
+
+          python -m pytest \
+            --cov=atem_ai_vision_mixer \
+            --cov-report=term-missing
+
+  integration:
+    runs-on: macos-26
+
+    steps:
+      - name: Check out the repository
+        uses: actions/checkout@v7
+
+      - name: Set up Python
+        uses: actions/setup-python@v7
+        with:
+          python-version: "3.11.9"
+          cache: pip
+          cache-dependency-path: .github/workflows/ci.yml
+
+      - name: Install test tools
+        run: |
+          python -m pip install pytest
+          if [ -f pyproject.toml ]; then
+            python -m pip install --editable .
+          fi
+
+      - name: Run scenario replays
+        run: |
+          if [ ! -d tests ]; then
+            if [ -d atem_ai_vision_mixer ]; then
+              echo "Application code exists, but the scenario tests are missing."
+              exit 1
+            fi
+
+            echo "::notice::No application code or scenarios exist yet; the bootstrap integration job has nothing to run."
+            exit 0
+          fi
+
+          python -m pytest

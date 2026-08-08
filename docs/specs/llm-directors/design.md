@@ -74,11 +74,13 @@ New package `atem_ai_vision_mixer/director/` additions:
 ```python
 ollama.chat(
     model="qwen3:4b",
-    messages=[{"role": "system", "content": SYSTEM},   # stable → cached prefix
-              {"role": "user", "content": world_state_json}],  # volatile → last
-    format=shot_intent_schema(camera_ids),   # grammar-constrained
+    messages=[
+        {"role": "system", "content": SYSTEM},  # stable → cached prefix
+        {"role": "user", "content": world_state_json},
+    ],  # volatile → last
+    format=shot_intent_schema(camera_ids),  # grammar-constrained
     options={"temperature": 0, "num_predict": 128},
-    keep_alive=-1,                            # never unload between calls
+    keep_alive=-1,  # never unload between calls
 )
 ```
 
@@ -95,16 +97,24 @@ machine uncomfortably close to swap, and swap is fatal to frame timing.
 ```python
 from anthropic import AnthropicBedrockMantle
 
-client = AnthropicBedrockMantle(aws_region="us-east-1")   # region is REQUIRED, no default
+client = AnthropicBedrockMantle(
+    aws_region="us-east-1"
+)  # region is REQUIRED, no default
 
 client.messages.create(
-    model="anthropic.claude-opus-5",          # Bedrock IDs carry the provider prefix
+    model="anthropic.claude-opus-5",  # Bedrock IDs carry the provider prefix
     max_tokens=1024,
-    system=[{"type": "text", "text": SYSTEM_AND_SCHEMA,
-             "cache_control": {"type": "ephemeral"}}],     # explicit — see below
-    output_config={"format": {"type": "json_schema",
-                              "schema": ShotPolicy.model_json_schema()},
-                   "effort": "low"},
+    system=[
+        {
+            "type": "text",
+            "text": SYSTEM_AND_SCHEMA,
+            "cache_control": {"type": "ephemeral"},
+        }
+    ],  # explicit — see below
+    output_config={
+        "format": {"type": "json_schema", "schema": ShotPolicy.model_json_schema()},
+        "effort": "low",
+    },
     messages=[{"role": "user", "content": world_state_summary}],
 )
 ```
