@@ -63,6 +63,41 @@ bypass.
 
 ---
 
+## What already exists — do not assume a clean slate
+
+`.github/workflows/` is **not** empty. Two workflows were added before this spec was written and
+are live:
+
+| Workflow | Trigger | What it does |
+|---|---|---|
+| `claude-code-review.yml` | `pull_request` (opened, synchronize, ready_for_review, reopened) | Automated Claude review pass on every PR |
+| `claude.yml` | issue/PR comments, reviews, issues opened | On-demand Claude, invoked by mentioning it in a comment |
+
+Both authenticate with a `CLAUDE_CODE_OAUTH_TOKEN` repository secret, which is already
+configured — verified by successful runs on three separate pull requests.
+
+Two consequences:
+
+**1. `ci.yml` is added alongside these, not into an empty directory.** Nothing here replaces
+them.
+
+**2. This is the "second reviewer" the solo-developer problem said was impossible — partly.**
+Requirement 3 notes that GitHub will not let a PR author approve their own PR, so a real approval
+gate is unattainable alone. `claude-code-review` does not solve that (an Action cannot satisfy a
+required *human* approval), but it does supply the thing that approval was a proxy for: a second
+pass over the diff that the author did not write. Combined with the PR-template checklist, that
+covers most of what the Amazon CR ritual actually delivers.
+
+**Do not make `Claude Code Review` a required status check.** It reports success regardless of
+what it finds — it comments rather than failing — so requiring it would add a merge gate that
+never blocks anything, while adding its runtime to every merge (10 minutes on a large diff, in
+the observed runs). Worse, if the OAuth token ever expires, every PR in the repo becomes
+unmergeable for a reason unrelated to code quality. Keep it advisory and let a human read its
+comments.
+
+The required checks stay `ci / lint` and `ci / test` — deterministic, fast, and meaningful when
+they fail.
+
 ## Components / changes
 
 ### `.github/workflows/ci.yml`
