@@ -27,18 +27,22 @@ construct needs a paragraph to explain, prefer the simpler one that doesn't.
 ## Task Group 1: Project scaffolding
 
 - Create `pyproject.toml`: hatchling backend, package `atem_ai_vision_mixer`, `requires-python
-  = ">=3.11"`, dependency `pydantic>=2`, optional group `dev = ["pytest", "pytest-cov"]`.
-- Move the Ruff settings out of `.vscode/settings.json` into `[tool.ruff]` in `pyproject.toml`
-  so linting works outside the editor. Leave `.vscode/settings.json` otherwise intact.
+  = ">=3.11"`, dependency `pydantic>=2`, optional group
+  `dev = ["pytest", "pytest-cov", "ruff"]`.
+- Put portable Ruff settings in `[tool.ruff]` in `pyproject.toml` so linting works outside the
+  editor. Keep `.vscode/settings.json` byte-identical: its formatter and save actions are VS
+  Code integration settings and cannot be moved into `pyproject.toml`.
 - Create package directories with `__init__.py`: `atem_ai_vision_mixer/`,
   `atem_ai_vision_mixer/director/`, `atem_ai_vision_mixer/execution/`, and `tests/`.
+- Add one scaffold test that imports `atem_ai_vision_mixer`, so this first application pull
+  request exercises the test job instead of failing because pytest collected nothing.
 - Do **not** create `capture/` or `perception/` — out of scope, see design "Do NOT touch".
 - Install into the existing 3.11.9 venv: `.venv/bin/pip install -e ".[dev]"`.
 
 ## Task Group 2: Checkpoint
 
 - `.venv/bin/python -c "import atem_ai_vision_mixer"` succeeds.
-- `.venv/bin/pytest` runs and reports zero tests collected (not an error).
+- `.venv/bin/pytest` runs the scaffold import test and passes.
 - `.venv/bin/ruff check .` passes clean.
 
 ## Task Group 3: The two contracts (R1, R2)

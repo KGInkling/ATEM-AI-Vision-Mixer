@@ -10,8 +10,9 @@ project and the part that needs no hardware at all. Everything here runs on a la
 
 Four deliberate constraints keep the code readable for someone new to Python:
 
-1. **Two dependencies only.** `pydantic` at runtime, `pytest` for tests. No OpenCV, no ML, no
-   network, no async. Those arrive in later specs, behind interfaces this spec defines.
+1. **One runtime dependency only.** `pydantic` is required at runtime; `pytest`, `pytest-cov`,
+   and Ruff are development tools. No OpenCV, no ML, no network, no async. Those arrive in later
+   specs, behind interfaces this spec defines.
 2. **Everything synchronous.** One `tick()` call per loop iteration. Async concurrency is a real
    need for the LLM tiers later, but it would obscure the logic here.
 3. **The controller is a straight run of guard clauses.** Each safety rule is one `if` that
@@ -50,8 +51,10 @@ free of inheritance machinery and makes the eventual swap to real hardware a one
 All paths relative to the repo root. Every file below is new.
 
 - `pyproject.toml`: hatchling build, package `atem_ai_vision_mixer`, requires-python `>=3.11`,
-  dependency `pydantic>=2`, optional-dependency group `dev = ["pytest"]`. Ruff config moved here
-  from `.vscode/` so it applies outside the editor too.
+  dependency `pydantic>=2`, optional-dependency group
+  `dev = ["pytest", "pytest-cov", "ruff"]`. Portable Ruff config lives here so it applies
+  outside the editor too. `.vscode/settings.json` keeps the VS Code-only formatter and save
+  actions, which have no `pyproject.toml` equivalent.
 
 - `atem_ai_vision_mixer/world_state.py`: `ProgramState`, `AudioState`, `CameraState`,
   `WorldState` — Pydantic models per Requirement 1. Score fields use
