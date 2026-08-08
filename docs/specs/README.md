@@ -27,9 +27,9 @@ Work in this order:
 
 | Step | Do | Why here |
 |---|---|---|
-| **1** | Spec 2, task groups **1, 2, 4, 6** | CI workflow, PR template, CODEOWNERS, ruleset in `evaluate` mode. **None of this needs application code.** The gate exists before there is anything to gate. |
+| **1** | Spec 2, task groups **1, 2, 4, 6** | CI workflow, PR template, CODEOWNERS, and the active ruleset. **None of this needs application code.** GitHub rejects non-blocking `evaluate` mode on this plan, so activation follows two green bootstrap PRs and protects the first application PR. |
 | **2** | Spec 1, task groups **1–3** | Scaffolding and the two contracts. The first real pull request, and the pipeline's first real exercise. |
-| **3** | Spec 2, task groups **3, 5, 7, 8** | Coverage gates (now there is code to measure), Docker, and flipping the ruleset to `active`. |
+| **3** | Spec 2, task groups **3, 5, 7, 8** | Coverage gates (now there is code to measure), Docker, and negative enforcement tests. |
 | **4** | Spec 1, remaining groups | The safety controller and everything after, each PR now fully gated. |
 | **5** | Specs 3 → 4 → 5 | In order. |
 

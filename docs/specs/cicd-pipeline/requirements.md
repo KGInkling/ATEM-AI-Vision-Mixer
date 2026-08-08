@@ -4,11 +4,15 @@ Spec 2 of 5. Delivers continuous integration, an Amazon-shaped code review proce
 reproducible builds, and a staged promotion pipeline.
 
 **The finding this whole spec rests on:** `github.com/KGInkling/ATEM-AI-Vision-Mixer` is a
-**public** repository on GitHub Free. Every feature below — rulesets, required status checks,
-CODEOWNERS, Environments with required reviewers *and* wait timers, unlimited macOS Actions
-minutes — is free on public repos and **unavailable on a Free private repo**. Notably, even
-paying $4/month for GitHub Pro does *not* restore required reviewers or wait timers on a private
-repo; those stay public-only until Enterprise. See `design.md` for the plan matrix.
+**public** repository on GitHub Free. The enforcement features below — rulesets, required status
+checks, CODEOWNERS, Environments with required reviewers *and* wait timers, unlimited macOS
+Actions minutes — are free on public repos and **unavailable on a Free private repo**. Notably,
+even paying $4/month for GitHub Pro does *not* restore required reviewers or wait timers on a
+private repo; those stay public-only until Enterprise.
+
+One staging feature is not available: GitHub's API rejects ruleset `evaluate` enforcement on
+this plan as Enterprise-only. The ruleset is therefore created as `active` after the CI jobs have
+passed on the two bootstrap pull requests. See `design.md` for the plan matrix and rationale.
 
 ---
 

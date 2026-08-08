@@ -18,7 +18,8 @@ Verified against GitHub's own docs source (`data/reusables/gated-features/*.md`)
 
 | Feature | Free + **public** (us) | Free + private | Pro + private |
 |---|---|---|---|
-| Repository rulesets / branch protection | ✅ | ❌ | ✅ |
+| Repository rulesets / active branch protection | ✅ | ❌ | ✅ |
+| Ruleset `evaluate` mode / Rule Insights | ❌ Enterprise only | ❌ | ❌ |
 | Required status checks | ✅ | ❌ | ✅ |
 | CODEOWNERS | ✅ | ❌ | ✅ |
 | Environments + secrets | ✅ | ❌ | ✅ |
@@ -27,11 +28,15 @@ Verified against GitHub's own docs source (`data/reusables/gated-features/*.md`)
 | Actions minutes | ✅ unlimited, incl. macOS | 2,000/mo (÷10 on macOS ≈ 200) | 3,000/mo |
 | Merge queue | ❌ (org-owned repos only) | ❌ | ❌ |
 
-Two consequences worth internalising. First, **going private is not a $4/month decision** — Pro
+Three consequences worth internalising. First, **going private is not a $4/month decision** — Pro
 still doesn't give required reviewers or wait timers on a private repo, which are the two
 features that make the pipeline Amazon-shaped at all. Public is not merely cheaper here; it is
 the only configuration where this design works. Second, merge queue is unavailable at any price
-because the repo is user-owned rather than organisation-owned.
+because the repo is user-owned rather than organisation-owned. Third, repository rulesets work
+on this public Free repo, but their non-blocking `evaluate` mode does not: on August 8, 2026, the
+live create-ruleset API returned HTTP 422 and identified that mode as Enterprise-only. The
+ruleset must therefore be created as `active` after its status-check names have been proven on
+bootstrap pull requests.
 
 ### Rulesets, not legacy branch protection
 
@@ -95,8 +100,10 @@ the observed runs). Worse, if the OAuth token ever expires, every PR in the repo
 unmergeable for a reason unrelated to code quality. Keep it advisory and let a human read its
 comments.
 
-The required checks stay `ci / lint` and `ci / test` — deterministic, fast, and meaningful when
-they fail.
+The required checks stay `lint` and `test` — deterministic, fast, and meaningful when they
+fail. GitHub may display these as `ci / lint` and `ci / test`, but the workflow name is not part
+of a ruleset status-check context. [GitHub's ruleset troubleshooting documentation](https://docs.github.com/en/repositories/configuring-branches-and-merges-in-your-repository/managing-rulesets/troubleshooting-rules)
+specifies the workflow format as the job name only.
 
 ## Components / changes
 
@@ -146,7 +153,7 @@ there is no `gh ruleset create`. Any guide showing one is wrong.
 {
   "name": "main-protection",
   "target": "branch",
-  "enforcement": "evaluate",
+  "enforcement": "active",
   "bypass_actors": [],
   "conditions": { "ref_name": { "include": ["~DEFAULT_BRANCH"], "exclude": [] } },
   "rules": [
@@ -164,14 +171,18 @@ there is no `gh ruleset create`. Any guide showing one is wrong.
         "strict_required_status_checks_policy": true,
         "do_not_enforce_on_create": false,
         "required_status_checks": [
-          { "context": "ci / lint" },
-          { "context": "ci / test" } ] } }
+          { "context": "lint" },
+          { "context": "test" } ] } }
   ]
 }
 ```
 
-Ship it with `"enforcement": "evaluate"` first. Evaluate mode logs what *would* have been
-blocked without blocking anything — a real dry run. Flip to `"active"` after a week.
+Ship it with `"enforcement": "active"`. A non-blocking evaluation period would be preferable,
+but GitHub rejects `evaluate` on this repository's plan. Before creation, observe `lint`, `test`,
+and `integration` passing on the bootstrap pull requests and confirm the required contexts are
+the job names `lint` and `test`. Task group 8 still performs the destructive and failing-check
+tests; activation itself is moved here so application code is protected from its first pull
+request.
 
 ### Coverage configuration in `pyproject.toml`
 
@@ -287,8 +298,9 @@ stopped ticking) and sustained feed-unhealthy.
 - **CI self-test**: open a deliberately failing pull request (a lint error, then a failing test,
   then a coverage drop) and confirm each is blocked. A CI pipeline nobody has watched fail is
   not known to work.
-- **Ruleset**: run a week in `evaluate` mode and read what it *would* have blocked before going
-  `active`. Then attempt `git push origin main` and confirm rejection.
+- **Ruleset**: confirm the API reports `active`, then attempt `git push origin main` and confirm
+  rejection. Open a pull request with a deliberate lint error, confirm it is blocked, fix it,
+  and confirm it becomes mergeable.
 - **Docker**: `docker build` and run the suite on a machine that has never had Blackmagic
   drivers installed. It must pass.
 - **Pipeline**: trigger `promote.yml` manually and confirm `alpha` and `beta` pass, and that
@@ -333,6 +345,10 @@ the Builders' Library — is the **explicit written review checklist**, which is
 2. **Bake and promotion — RESOLVED: service-aligned and manual.** Bake is one complete service,
    not a wall-clock timer, and every promotion from `gamma` onward requires a human approving
    after a clean service. Recorded as R9. Wait timers may be a floor, never the trigger.
+3. **Ruleset dry run — RESOLVED: activate after bootstrap checks.** The public Free repository
+   supports active rulesets, but the live API rejects `evaluate` enforcement as Enterprise-only.
+   Create the ruleset as active only after the CI workflow has passed on the CI and review-process
+   pull requests. Keep the negative push and failing-check tests in task group 8.
 
 ## Open questions
 
