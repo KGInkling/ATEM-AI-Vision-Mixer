@@ -81,7 +81,18 @@ See `docs/specs/README.md` for the full cross-spec implementation order.
 - Note the **exact** check names as GitHub reports them (e.g. `ci / lint`) — the ruleset in the
   next group must match them character for character or the requirement silently never applies.
 
-## Task Group 6: Ruleset in evaluate mode (R2, R12)
+## Task Group 6: Repository settings and ruleset in evaluate mode (R2, R2a, R12)
+
+**Branch cleanup (R2a)** — a repo setting, not a ruleset rule, so it is configured separately:
+
+```bash
+gh api --method PATCH /repos/KGInkling/ATEM-AI-Vision-Mixer -F delete_branch_on_merge=true
+```
+
+This deletes the remote head branch on merge. It does **not** touch local clones — deleting the
+local branch after a merge stays the implementer's job.
+
+**The ruleset:**
 
 - Commit `.github/rulesets/main-protection.json` (full JSON in `design.md`), with
   `"enforcement": "evaluate"` and `"bypass_actors": []`.

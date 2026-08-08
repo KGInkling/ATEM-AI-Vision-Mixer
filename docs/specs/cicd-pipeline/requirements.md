@@ -45,6 +45,22 @@ WHEN a genuine emergency requires bypassing
 THEN the documented escape hatch SHALL be flipping the ruleset's `enforcement` field to
 `disabled` and back — a deliberate, auditable act — rather than an invisible admin bypass.
 
+## Requirement 2a: Merged branches are cleaned up
+
+The repository SHALL NOT accumulate stale feature branches.
+
+WHEN a pull request is merged
+THEN its head branch SHALL be deleted automatically on the remote, without anyone remembering to
+do it.
+
+WHEN an implementing agent's pull request is merged
+THEN it SHALL also delete its **local** copy of that branch — the remote setting does not touch
+local clones.
+
+WHEN a pull request is closed **without** merging
+THEN its branch SHALL NOT be deleted automatically. The work may still be wanted, and a closed
+PR is not the same signal as a merged one.
+
 ## Requirement 3: Review discipline without a second reviewer
 
 GitHub does not permit a pull request author to approve their own pull request, at any plan
