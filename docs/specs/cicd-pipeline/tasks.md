@@ -31,7 +31,13 @@ See `docs/specs/README.md` for the full cross-spec implementation order.
   private, **stop** — most of this spec silently stops working (R13, and the plan matrix in
   `design.md`).
 - Confirm no rulesets exist yet: `gh api /repos/KGInkling/ATEM-AI-Vision-Mixer/rulesets`.
-- Confirm `gh auth status` shows the `repo` scope.
+- Confirm `gh auth status` shows the `repo` **and `workflow`** scopes — the second is required to
+  push anything under `.github/workflows/`.
+- **Inventory the existing workflows** — `.github/workflows/` is *not* empty. `ls .github/workflows`
+  and `gh run list --limit 10`. Expect `claude-code-review.yml` and `claude.yml`, both live and
+  passing. Your `ci.yml` is added **alongside** them; nothing here replaces or modifies them.
+- Confirm `delete_branch_on_merge` is already enabled (R2a):
+  `gh api /repos/KGInkling/ATEM-AI-Vision-Mixer -q .delete_branch_on_merge`.
 
 ## Task Group 2: CI workflow (R1)
 
@@ -80,6 +86,10 @@ See `docs/specs/README.md` for the full cross-spec implementation order.
   separate status checks and all pass.
 - Note the **exact** check names as GitHub reports them (e.g. `ci / lint`) — the ruleset in the
   next group must match them character for character or the requirement silently never applies.
+- `Claude Code Review` will also appear on the PR. **Do not add it to the required checks** — it
+  reports success regardless of findings, so it would gate nothing while adding its runtime to
+  every merge, and a lapsed OAuth token would block the whole repo. It stays advisory; read its
+  comments. Rationale in `design.md` → *What already exists*.
 
 ## Task Group 6: Repository settings and ruleset in evaluate mode (R2, R2a, R12)
 
