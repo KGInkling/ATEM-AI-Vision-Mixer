@@ -16,13 +16,13 @@ self-contained — an agent with none of the design conversation should be able 
 > **There are five spec sets in `docs/specs/`. Spec numbers are NOT the implementation order.**
 > The review gate goes up before the first application code goes through it. Work in this order:
 >
-> 1. **`cicd-pipeline`, task groups 1, 2, 4, 6** — CI workflow, PR template, CODEOWNERS, ruleset
->    in `evaluate` mode. None of this needs application code, and it means every later pull
->    request is gated from the very first one.
+> 1. **`cicd-pipeline`, task groups 1, 2, 4, 6** — CI workflow, PR template, CODEOWNERS, and the
+>    active ruleset. GitHub rejects non-blocking `evaluate` mode on this plan, so activation
+>    follows two green bootstrap pull requests and protects the first application pull request.
 > 2. **`offline-switching-core`, task groups 1–3** — scaffolding and the two contracts. This is
 >    the first real pull request and the pipeline's first real exercise.
 > 3. **`cicd-pipeline`, task groups 3, 5, 7, 8** — coverage gates (there is now code to measure),
->    Docker, and flipping the ruleset to `active`.
+>    Docker, and negative enforcement tests.
 > 4. **`offline-switching-core`, remaining groups** — fake switcher, safety controller, rule-based
 >    director, scenarios, tests.
 > 5. **`perception`** — video and audio into a `WorldState`.

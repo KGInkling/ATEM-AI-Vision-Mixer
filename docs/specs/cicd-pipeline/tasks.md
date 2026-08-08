@@ -17,8 +17,8 @@ before the first application code goes through it.
 
 | Groups | When | Why |
 |---|---|---|
-| **1, 2, 4, 6** | **Before any application code** | CI workflow, PR template, CODEOWNERS, ruleset in `evaluate` mode. None of it needs application code. Putting it up first means every pull request in the project is gated — including spec 1's safety controller, which is the single PR you least want ungated. |
-| **3, 5, 7, 8** | After spec 1's task groups 1–3 | Coverage gates need code to measure — this is the only genuine dependency. Docker and flipping the ruleset to `active` go here too. |
+| **1, 2, 4, 6** | **Before any application code** | CI workflow, PR template, CODEOWNERS, and the active ruleset. None of it needs application code. Putting it up first means every application pull request is gated — including spec 1's safety controller, which is the single PR you least want ungated. GitHub rejects non-blocking `evaluate` mode on this plan. |
+| **3, 5, 7, 8** | After spec 1's task groups 1–3 | Coverage gates need code to measure — this is the only genuine dependency. Docker and negative enforcement tests go here too. |
 | **9–11** | **Blocked (~Sept 2026)** | Need a self-hosted runner on the Mac with the ATEM and DeckLink attached. |
 
 See `docs/specs/README.md` for the full cross-spec implementation order.
@@ -84,14 +84,16 @@ See `docs/specs/README.md` for the full cross-spec implementation order.
 
 - Open a throwaway pull request. Confirm `lint`, `test`, and `integration` all appear as
   separate status checks and all pass.
-- Note the **exact** check names as GitHub reports them (e.g. `ci / lint`) — the ruleset in the
-  next group must match them character for character or the requirement silently never applies.
+- Note the **exact job names** GitHub reports: `lint`, `test`, and `integration`. The Actions UI
+  may display a workflow prefix such as `ci / lint`, but ruleset status-check contexts use the
+  job name only. The ruleset in the next group must match those contexts character for character
+  or the requirement silently never applies.
 - `Claude Code Review` will also appear on the PR. **Do not add it to the required checks** — it
   reports success regardless of findings, so it would gate nothing while adding its runtime to
   every merge, and a lapsed OAuth token would block the whole repo. It stays advisory; read its
   comments. Rationale in `design.md` → *What already exists*.
 
-## Task Group 6: Repository settings and ruleset in evaluate mode (R2, R2a, R12)
+## Task Group 6: Repository settings and active ruleset (R2, R2a, R12)
 
 **Branch cleanup (R2a)** — a repo setting, not a ruleset rule, so it is configured separately:
 
@@ -105,12 +107,17 @@ local branch after a merge stays the implementer's job.
 **The ruleset:**
 
 - Commit `.github/rulesets/main-protection.json` (full JSON in `design.md`), with
-  `"enforcement": "evaluate"` and `"bypass_actors": []`.
+  `"enforcement": "active"` and `"bypass_actors": []`.
 - Apply it: `gh api --method POST /repos/KGInkling/ATEM-AI-Vision-Mixer/rulesets --input
   .github/rulesets/main-protection.json`.
 - ⚠️ Use `gh api`. **`gh ruleset` has no `create` subcommand** — only `check`, `list`, `view`.
 - Record the returned ruleset ID in the JSON file as a comment or in the README.
-- Leave it in evaluate mode for about a week and read what it *would* have blocked.
+- Confirm the API response reports `"enforcement": "active"`, an empty bypass list, and required
+  job contexts `lint` and `test`.
+
+GitHub's live API rejects `evaluate` enforcement on this public Free repository as
+Enterprise-only. Activation therefore happens here, after the CI and review-process pull
+requests have demonstrated green checks, so the first application pull request is protected.
 
 ## Task Group 7: Docker (R6, R7)
 
@@ -125,10 +132,10 @@ local branch after a merge stays the implementer's job.
   Note that Docker Desktop 4.35+ added *USB* passthrough, which does not apply here.
 - Verify on a machine with no Blackmagic drivers: `docker build` then run the suite. It must pass.
 
-## Task Group 8: Activate and verify enforcement (R2)
+## Task Group 8: Verify enforcement (R2)
 
-- Flip the ruleset to active:
-  `gh api --method PUT /repos/.../rulesets/<ID> -f enforcement=active`.
+- Confirm the committed and live rulesets both still report `"enforcement": "active"`. If they
+  differ, stop and treat it as configuration drift rather than silently repairing it.
 - Attempt `git push origin main` and **confirm it is rejected**. If it succeeds, the ruleset is
   misconfigured — most likely `bypass_actors` is not empty.
 - Open a pull request with a deliberate lint error, confirm merge is blocked, fix, confirm merge
