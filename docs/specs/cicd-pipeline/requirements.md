@@ -101,6 +101,14 @@ WHEN coverage of `execution/controller.py` falls below 95%
 THEN the build SHALL fail. It is the safety layer; an untested branch there is a rule that can
 silently fail on air.
 
+WHEN a path in `.coverage-thresholds` does not exist in either the pull request or its base
+branch because its scheduled implementation task group has not landed yet
+THEN CI SHALL emit a visible pending notice and SHALL activate that file's gate automatically
+on the pull request that adds it.
+
+WHEN a thresholded path exists on the base branch but is missing from the pull request
+THEN CI SHALL fail, so deleting or renaming a protected file cannot bypass its coverage gate.
+
 WHEN coverage of the lines changed by a pull request falls below 90%
 THEN the build SHALL fail.
 

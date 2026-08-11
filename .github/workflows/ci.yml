@@ -57,7 +57,7 @@ jobs:
 
       - name: Install test tools
         run: |
-          python -m pip install pytest pytest-cov
+          python -m pip install coverage diff-cover pytest pytest-cov
           if [ -f pyproject.toml ]; then
             python -m pip install --editable .
           fi
@@ -76,7 +76,43 @@ jobs:
 
           python -m pytest \
             --cov=atem_ai_vision_mixer \
-            --cov-report=term-missing
+            --cov-report=term-missing \
+            --cov-report=xml
+
+      - name: Enforce per-file coverage thresholds
+        run: |
+          while IFS=: read -r path threshold; do
+            if [ -z "$path" ]; then
+              continue
+            fi
+
+            if [ ! -f "$path" ]; then
+              if git cat-file -e "origin/main:$path" 2>/dev/null; then
+                echo "::error file=$path::A file with a coverage threshold was removed."
+                exit 1
+              fi
+
+              echo "::notice file=$path::The $threshold% coverage gate is pending until this file is added."
+              continue
+            fi
+
+            coverage report \
+              --include="$path" \
+              --fail-under="$threshold"
+          done < .coverage-thresholds
+
+      - name: Enforce changed-line coverage
+        run: |
+          set +e
+          diff-cover coverage.xml \
+            --compare-branch=origin/main \
+            --fail-under=90 \
+            --format markdown:diff-cover.md
+          diff_cover_exit_code=$?
+          set -e
+
+          cat diff-cover.md >> "$GITHUB_STEP_SUMMARY"
+          exit "$diff_cover_exit_code"
 
   integration:
     runs-on: macos-26

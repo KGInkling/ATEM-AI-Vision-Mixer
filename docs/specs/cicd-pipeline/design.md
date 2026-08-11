@@ -195,9 +195,17 @@ again with `--include` and an explicit `--fail-under`.
 > filtered subset rather than the total, producing confusing results. Always pass `--fail-under`
 > explicitly on the per-file invocations.
 
-Patch coverage uses **`diff-cover`** (10.4.2, actively maintained, released August 2026) against
-`origin/main`. No account, no network service. Requires `fetch-depth: 0` on checkout or it
-produces garbage.
+The first threshold names `execution/controller.py`, which is intentionally scheduled after
+this coverage task group. Until that file lands, the CI loop checks both the pull-request tree
+and `origin/main`: missing from both means "not implemented yet" and produces a visible pending
+notice. Missing only from the pull request means a protected file was deleted or renamed and
+fails the build. This lets the 95% gate activate on the controller's first pull request without
+either blocking earlier work or creating a deletion loophole.
+
+Patch coverage uses the actively maintained **`diff-cover`** against `origin/main`. No account,
+no network service. Requires `fetch-depth: 0` on checkout or it produces garbage. Its current
+`--format markdown:<path>` option writes the report into the GitHub step summary; the older
+`--markdown-report` option is deprecated in 10.5.0.
 
 Rejected alternative: GitHub's new native `Restrict code coverage` ruleset rule would be the
 ideal solution, but it is part of GitHub Code Quality, gated to **Team or Enterprise Cloud** —
