@@ -132,7 +132,7 @@ become the deployment promotion stages.
 |---|---|---|
 | `pyatem` / OpenSwitcher | `PyATEMMax` | PyATEMMax is dormant since 2022, protocol-capped at ATEM firmware 7.5, has no per-field change events, and has an open unanswered issue for this exact switcher model |
 | PyAV | `cv2.VideoCapture` | VideoCapture cannot decode audio at all, and audio is this project's most valuable signal |
-| `silero-vad` via onnxruntime | `webrtcvad`, or silero via PyTorch | WebRTC VAD reports speech through an entire worship set; the PyTorch path pulls ~2.5 GB on a memory-constrained machine |
+| Pinned Silero ONNX model loaded directly with onnxruntime | `webrtcvad`, the `silero-vad` Python package, or silero via PyTorch | WebRTC VAD reports speech through an entire worship set; the Python package declares the large PyTorch stack even when only ONNX inference is wanted |
 | `mediapipe.tasks.python.vision` | `mediapipe.solutions` | `mp.solutions` **no longer exists**. Every tutorial using it is dead code and fails on import |
 | `opencv-contrib-python` (via mediapipe) | also installing `opencv-python` | They collide on the `cv2` namespace |
 

@@ -222,7 +222,7 @@ rather than in a comment:
 | Group | Contents | In Docker? |
 |---|---|---|
 | core | `pydantic` | ✅ |
-| perception | `opencv-contrib-python`, `mediapipe`, `silero-vad`, `onnxruntime`, `av` | ✅ (file-based only) |
+| perception | `opencv-contrib-python`, `mediapipe`, `onnxruntime`, `av`; pinned Silero ONNX model packaged separately | ✅ (file-based only) |
 | llm | `ollama`, `anthropic[bedrock]` | ✅ |
 | dev | `pytest`, `pytest-cov`, `coverage`, `ruff`, `diff-cover` | ✅ |
 | **capture** | `av` + a **native ffmpeg built `--enable-decklink`** | ❌ **host only** |
