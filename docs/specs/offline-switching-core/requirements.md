@@ -46,6 +46,13 @@ SHALL expose a JSON Schema suitable for constraining LLM output.
 `ShotIntent` SHALL contain exactly: `camera: int`, `confidence: float` in `[0.0, 1.0]`, and
 `reason: str` drawn from a closed set of reason codes.
 
+The closed reason-code set SHALL be:
+- `hold` — keep the currently live camera
+- `better_framing` — the suggested camera has stronger framing
+- `subject_present` — the expected subject is present on the suggested camera
+- `motion` — observed movement motivates the suggested camera
+- `shot_variety` — the current shot needs a visual refresh
+
 WHEN `shot_intent_schema(camera_ids=[1, 2, 3])` is called
 THEN it SHALL return a JSON Schema dict whose `camera` property carries `enum: [1, 2, 3]`,
 so an LLM cannot name a camera that does not exist.
