@@ -23,8 +23,10 @@ need no models and give you a working pipeline to hang the harder stages off.
 
 ## Task Group 1: Dependencies and capture interface (R1)
 
-- Add a `perception` optional-dependency group to `pyproject.toml`: `av`, `mediapipe`,
-  `onnxruntime`, `silero-vad`.
+- Add a `perception` optional-dependency group to `pyproject.toml`: `av`, `mediapipe`, and
+  `onnxruntime`.
+- Do **not** install the `silero-vad` Python package. It declares PyTorch and torchaudio even
+  when only ONNX inference is wanted (R7).
 - ⚠️ Do **not** add `opencv-python`. MediaPipe installs `opencv-contrib-python`, which is a
   superset; installing both breaks the `cv2` namespace (R13).
 - `capture/source.py`: `CapturedFrame` dataclass (`video`, `audio`, `pts`) and the `FrameSource`
@@ -83,8 +85,13 @@ The cheapest and most operationally valuable stage. No models.
 
 ## Task Group 7: Audio VAD and pause grading (R7, R8)
 
-- `perception/audio_vad.py` loading silero-vad through **onnxruntime**, not PyTorch. The torch
-  path pulls ~2.5 GB on a machine where memory is the binding constraint (R7).
+- Vendor the official Silero ONNX model under `atem_ai_vision_mixer/perception/models/`. Pin it
+  to an upstream release, record its source URL and SHA-256 checksum, retain its license notice,
+  and ensure the build includes it as a package resource (R7, R13).
+- `perception/audio_vad.py` shall load that local model directly with
+  `onnxruntime.InferenceSession`, using NumPy arrays for audio and recurrent state. Do not import
+  the `silero-vad` Python package, PyTorch, or torchaudio, and do not download a model at runtime
+  (R7).
 - ⚠️ The model is **stateful** — it carries LSTM hidden state between calls. Hold that state on
   the `VadState` object and pass it back each call. Recreating it per chunk silently degrades
   detection quality, with no error.
@@ -98,6 +105,8 @@ The cheapest and most operationally valuable stage. No models.
 - Test the state machine with a synthetic boolean sequence rather than real audio — feed it a
   list of per-frame speech/no-speech decisions and assert the transitions and `pause_ms`.
 - Assert property 4: `pause_ms == 0` whenever `speaking`, monotonically increasing otherwise.
+- Assert the VAD loads its model from the installed package without network access and that
+  `silero_vad`, `torch`, and `torchaudio` are not importable dependencies.
 
 ## Task Group 9: People detection (R9)
 

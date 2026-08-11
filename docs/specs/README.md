@@ -131,9 +131,10 @@ Build order is easiest → hardest so the difficulty ramps:
    detection via `cv2.meanStdDev`; frozen detection needs *both* low `cv2.absdiff` **and** an
    identical frame hash for ≥3 frames, because a static-but-live camera still has sensor noise
    while a truly frozen feed repeats byte-identical frames.
-2. **Audio VAD** — `silero-vad` via **onnxruntime** (skips the ~2.5 GB torch dependency), plus
-   the pause grader: 150–250 ms = breath (don't cut), 400 ms–1.2 s = sentence boundary (the
-   sweet spot), >1.2 s = dead air.
+2. **Audio VAD** — a pinned Silero ONNX model loaded directly with **onnxruntime**. The
+   `silero-vad` Python package is intentionally not installed because it declares PyTorch and
+   torchaudio dependencies. The pause grader treats 150–250 ms as a breath (don't cut),
+   400 ms–1.2 s as a sentence boundary (the sweet spot), and >1.2 s as dead air.
 3. **People** — MediaPipe **Tasks** API. ⚠️ `mediapipe.solutions` no longer exists; every
    tutorial using `mp.solutions.pose` is dead code.
 4. **Framing** — arithmetic on detections, normalized by subject height so it's zoom-invariant.

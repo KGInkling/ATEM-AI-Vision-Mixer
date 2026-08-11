@@ -41,16 +41,21 @@ The distinction is that a live sensor always produces noise, so consecutive fram
 **and** an identical hash of the raw tile across ≥3 frames means frozen; near-zero difference
 with differing hashes means merely static, which is fine.
 
-### Why silero-vad over WebRTC VAD
+### Why Silero VAD over WebRTC VAD
 
 The input is the program mix — a lectern mic through a PA, with music beds, congregational
 singing, applause, and room reverb. WebRTC VAD is a GMM designed for narrowband telephony; in a
 sanctuary it reports "speech" through the entire worship set. Silero is trained across many
 languages and noise conditions and holds up.
 
-Critically, load it through **onnxruntime, not PyTorch**. The `silero-vad` package declares
-`torch` + `torchaudio`, roughly 2.5 GB, on a machine where memory is the binding constraint. The
-ONNX path is officially supported by the project and runs the same model.
+Critically, load the model directly through **onnxruntime, not the `silero-vad` Python package**.
+That package declares `torch` and `torchaudio` even when the caller only wants ONNX inference,
+which pulls the large PyTorch stack onto a machine where memory is the binding constraint.
+
+Vendor the official ONNX model as a package resource so inference never downloads a file. Pin
+the model to an upstream release, record its source URL and SHA-256 checksum, and retain its
+license notice beside it. `audio_vad.py` opens that local resource with
+`onnxruntime.InferenceSession` and supplies NumPy audio and recurrent state arrays directly.
 
 ### Why pose is not computed for every tile
 
@@ -78,9 +83,9 @@ New package `atem_ai_vision_mixer/perception/`, plus `capture/` and one tool.
   `cv2.Laplacian(...).var()`; blown/crushed via histogram tails.
 - `perception/motion.py` — `motion_score(thumbnail, prev_thumbnail) -> float`, mean absolute
   difference normalized to `[0, 1]`.
-- `perception/audio_vad.py` — `VadState` machine wrapping the silero ONNX model. Holds the LSTM
-  hidden state across calls (the model is stateful — this is easy to get wrong). Applies
-  hysteresis, tracks pause duration, and grades it.
+- `perception/audio_vad.py` — `VadState` machine wrapping the local Silero ONNX model directly
+  with `onnxruntime`. Holds the LSTM hidden state across calls (the model is stateful — this is
+  easy to get wrong). Applies hysteresis, tracks pause duration, and grades it.
 - `perception/people.py` — MediaPipe **Tasks** wrappers: `FaceDetector` and `PoseLandmarker`.
 - `perception/framing.py` — pure functions from detections to framing features and named
   defects, plus the `wander_ratio` tracker.
@@ -163,11 +168,14 @@ service a repeatable test fixture.
 ## Dependency notes
 
 ```bash
-pip install av mediapipe onnxruntime silero-vad
+pip install av mediapipe onnxruntime
 ```
 
 - `mediapipe` pulls in **`opencv-contrib-python`**. Do **not** also install `opencv-python` —
   the two collide on the `cv2` namespace. Let MediaPipe win; contrib is a superset.
+- Do **not** install the `silero-vad` Python package. The project uses its pinned ONNX model as
+  a local asset and calls ONNX Runtime directly, avoiding PyTorch, torchaudio, and runtime
+  downloads.
 - `onnxruntime` requires **macOS 14+**.
 - If WebRTC VAD is ever wanted for comparison, the installable package is **`webrtcvad-wheels`**,
   not `webrtcvad` — the latter has no arm64 wheel and compiles from C source.

@@ -11,7 +11,17 @@ requires-python = ">=3.11"
 dependencies = ["pydantic>=2"]
 
 [project.optional-dependencies]
+# Pydantic stays in the base dependencies so a plain installation remains usable.
+core = ["pydantic>=2"]
+perception = [
+  "av",
+  "mediapipe",
+  "onnxruntime",
+  "opencv-contrib-python",
+]
+llm = ["anthropic[bedrock]", "ollama"]
 dev = ["coverage", "diff-cover", "pytest", "pytest-cov", "ruff"]
+capture = ["av"]
 
 [tool.hatch.build.targets.wheel]
 packages = ["atem_ai_vision_mixer"]

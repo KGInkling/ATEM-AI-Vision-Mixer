@@ -100,7 +100,10 @@ Detection SHALL use hysteresis so it does not chatter: entering `SPEAKING` SHALL
 consecutive speech frames, and entering `PAUSE` SHALL require several consecutive non-speech
 frames.
 
-The VAD SHALL run without PyTorch.
+The VAD SHALL load a pinned Silero ONNX model from a local package resource through
+`onnxruntime`. Model inference SHALL NOT download files at runtime.
+
+The VAD SHALL run without the `silero-vad` Python package, PyTorch, or torchaudio.
 
 ## Requirement 8: Pause grading
 
