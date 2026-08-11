@@ -62,6 +62,9 @@ See `docs/specs/README.md` for the full cross-spec implementation order.
 - Add per-file gates as a CI step reading a `.coverage-thresholds` file
   (`atem_ai_vision_mixer/execution/controller.py:95`), looping over it with
   `coverage report --include="$path" --fail-under="$threshold"`.
+- The controller is scheduled for a later task group. If a threshold path is missing from both
+  the pull request and `origin/main`, emit a visible pending notice and continue. If it exists
+  on `origin/main` but is missing from the pull request, fail so deletion cannot bypass the gate.
 - ⚠️ **Pass `--fail-under` explicitly on every per-file invocation.** If you rely on the
   `pyproject.toml` value, coverage applies it to the *filtered subset* rather than the total and
   the results are misleading. This is the single most common mistake with this approach.
