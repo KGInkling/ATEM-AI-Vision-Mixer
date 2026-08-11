@@ -60,10 +60,11 @@ All paths relative to the repo root. Every file below is new.
   `WorldState` — Pydantic models per Requirement 1. Score fields use
   `Annotated[float, Field(ge=0.0, le=1.0)]` so the bounds are declared once, on the type.
 
-- `atem_ai_vision_mixer/director/intent.py`: `ShotIntent` model, a `Reason` string-enum of
-  allowed reason codes, and `shot_intent_schema(camera_ids)` which returns the JSON Schema with
-  an `enum` patched into the `camera` property. That patch is what stops a future LLM from
-  inventing a camera that isn't connected.
+- `atem_ai_vision_mixer/director/intent.py`: `ShotIntent` model, a `Reason` string-enum with
+  `hold`, `better_framing`, `subject_present`, `motion`, and `shot_variety`, and
+  `shot_intent_schema(camera_ids)` which returns the JSON Schema with an `enum` patched into the
+  `camera` property. That patch is what stops a future LLM from inventing a camera that isn't
+  connected.
 
 - `atem_ai_vision_mixer/director/rules.py`: `RulesDirector.decide(state) -> ShotIntent`. Scores
   each healthy camera as a weighted sum of `framing_score`, a subject-present bonus, and a

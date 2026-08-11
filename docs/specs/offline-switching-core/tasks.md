@@ -50,8 +50,9 @@ construct needs a paragraph to explain, prefer the simpler one that doesn't.
 - `world_state.py`: `ProgramState`, `AudioState`, `CameraState`, `WorldState` as Pydantic
   models. Bound every score field to `[0.0, 1.0]` with
   `Annotated[float, Field(ge=0.0, le=1.0)]` — declare the constraint on the type, once.
-- `director/intent.py`: `Reason` (string enum of allowed reason codes), `ShotIntent`
-  (`camera: int`, `confidence: float` bounded `[0, 1]`, `reason: Reason`).
+- `director/intent.py`: `Reason` (string enum with `hold`, `better_framing`,
+  `subject_present`, `motion`, and `shot_variety`), `ShotIntent` (`camera: int`,
+  `confidence: float` bounded `[0, 1]`, `reason: Reason`).
 - `director/intent.py`: `shot_intent_schema(camera_ids: list[int]) -> dict` — call
   `ShotIntent.model_json_schema()`, then patch `enum` into the `camera` property. Add a comment
   explaining that this is what will stop a future LLM naming a camera that isn't connected.
