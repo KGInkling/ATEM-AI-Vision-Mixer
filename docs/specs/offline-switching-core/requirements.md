@@ -70,9 +70,10 @@ WHEN `cut()` is called
 THEN program and preview SHALL swap: the previous preview becomes program, and the previous
 program becomes preview.
 
-WHEN `auto()` is called
-THEN `in_transition` SHALL report `True` for the configured transition duration, and the buses
-SHALL swap only once the transition completes.
+WHEN `auto(now)` is called
+THEN `in_transition(now)` SHALL report `True` for the configured transition duration, and the
+buses SHALL swap only once the transition completes. Both methods SHALL use their
+caller-supplied monotonic timestamp rather than reading an ambient clock.
 
 WHEN `simulate_operator_take(camera)` is called
 THEN program SHALL change to that camera without the controller having commanded it, so
