@@ -71,8 +71,10 @@ All paths relative to the repo root. Every file below is new.
   penalty for the live camera going stale, then names the winner. Pure function of its input.
 
 - `atem_ai_vision_mixer/execution/switcher.py`: the `SwitcherClient` Protocol —
-  `program_input()`, `preview_input()`, `in_transition()`, `set_preview(camera)`, `cut()`,
-  `auto()`.
+  `program_input()`, `preview_input()`, `in_transition(now)`, `set_preview(camera)`, `cut()`,
+  `auto(now)`. The transition methods receive caller-supplied monotonic time so the fake stays
+  deterministic without an ambient clock; the real driver may ignore `now` when hardware state
+  already supplies the answer.
 
 - `atem_ai_vision_mixer/execution/fake_switcher.py`: `FakeSwitcher`, an in-memory implementation.
   Holds `_program`, `_preview`, and a transition end-time. Its `cut()` swaps the two buses, which

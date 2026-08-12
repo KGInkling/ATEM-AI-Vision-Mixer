@@ -61,14 +61,15 @@ construct needs a paragraph to explain, prefer the simpler one that doesn't.
 ## Task Group 4: The switcher interface and its fake (R3)
 
 - `execution/switcher.py`: `SwitcherClient` as a `typing.Protocol` with `program_input()`,
-  `preview_input()`, `in_transition()`, `set_preview(camera)`, `cut()`, `auto()`. Docstring it
-  as "the set of methods any switcher must provide — real or fake".
+  `preview_input()`, `in_transition(now)`, `set_preview(camera)`, `cut()`, `auto(now)`.
+  Docstring it as "the set of methods any switcher must provide — real or fake". The transition
+  methods take caller-supplied monotonic time so the fake never reads an ambient clock.
 - `execution/fake_switcher.py`: `FakeSwitcher`.
   - `cut()` **swaps** program and preview. This is real ATEM behaviour and the single most
     likely place for the fake to diverge — get it right or the controller will be written
     against a fiction.
-  - `auto()` reports `in_transition() == True` until the configured duration elapses, then
-    swaps. It takes `now` as a parameter for the same reason the controller does.
+  - `auto(now)` reports `in_transition(now) == True` until the configured duration elapses,
+    then swaps. Both take `now` as a parameter for the same reason the controller does.
   - `simulate_operator_take(camera)` sets program directly, modelling a human hitting a button.
   - `writes: list[str]` records every state-changing call, so shadow-mode tests can assert it
     stayed empty.
