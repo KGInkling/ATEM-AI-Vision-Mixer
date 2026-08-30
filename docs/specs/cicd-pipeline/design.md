@@ -109,33 +109,64 @@ specifies the workflow format as the job name only.
 
 ### `.github/workflows/ci.yml`
 
-Runs on `pull_request` and `push` to `main`. Two jobs so failures are legible as separate status
-checks: `lint` and `test`.
+Runs on `pull_request` and `push` to `main`. Separate jobs keep each failure legible: `lint`,
+`test`, `build`, `dependency-review`, and `integration`. Dependency review is pull-request-only
+because it needs a base/head dependency delta. The live ruleset continues to require only `lint`
+and `test` until the newer contexts are observed passing and activated separately.
 
-Pinned action versions, verified current as of August 2026:
+Immutable action pins, verified from the official release tags in August 2026:
 
-| Action | Version | Note |
+| Action | Release and commit | Note |
 |---|---|---|
-| `actions/checkout` | `@v7` | use `fetch-depth: 0` on the test job — `diff-cover` needs history |
-| `actions/setup-python` | `@v7` | has built-in pip caching: `cache: 'pip'`. No separate cache step needed. |
-| `actions/upload-artifact` | `@v7` | |
-| `actions/download-artifact` | `@v8` | **off-by-one against upload — this is not a typo** |
+| `actions/checkout` | `v7.0.1` at `3d3c42e5aac5ba805825da76410c181273ba90b1` | use `fetch-depth: 0` on the test job — `diff-cover` needs history |
+| `actions/setup-python` | `v7.0.0` at `5fda3b95a4ea91299a34e894583c3862153e4b97` | built-in pip caching; no separate cache action |
+| `actions/dependency-review-action` | `v5.0.0` at `a1d282b36b6f3519aa1f3fc636f609c47dddb294` | Node 24 requires runner 2.327.1 or newer; the observed hosted runner is 2.336.0 |
 
 Also set at workflow level: `permissions: contents: read` (least privilege) and a `concurrency`
-group cancelling superseded PR runs.
+group cancelling superseded PR runs. Checkout does not persist credentials after fetching.
 
 Runner choice: `ubuntu-latest` for lint and unit tests (fast, and the offline core is pure
 Python). `macos-26` for the integration job, since the production target is macOS. Free and
 unlimited on public repos, so there's no cost reason to avoid macOS here.
 
+The build job creates both distribution formats, installs the wheel without dependencies into a
+clean virtual environment, changes out of the checkout, and imports a representative nested
+capture module from inside that environment. This prevents either a source-tree import or an empty
+top-level package from making an incomplete wheel look valid.
+
+Dependency review uses GitHub's official action with `fail-on-severity: moderate` and
+`fail-on-scopes: runtime`. It does not post pull-request comments, so `contents: read` is the only
+job permission it needs.
+
+The macOS job installs `.[perception,dev]`, imports PyAV and NumPy explicitly, and runs the full
+suite with skip reasons. It proves the real recorded-media test is executable; it deliberately
+does not import PyAV and OpenCV together as a preflight because their bundled native libraries
+have a separately tracked same-process collision.
+
+### Staged evidence activation
+
+This change adds evidence alongside the live gate. It does not edit the ruleset or make a new
+context required. After a draft pull request proves the exact `build`, `dependency-review`, and
+`integration` context names on one frozen head SHA, CodeQL is enabled and observed in a separate
+checkpoint. Manual Claude evidence is added in its own task group. Only the final activation task
+updates branch protection, with the prior `lint`/`test` context list retained for rollback. A
+failed evidence-only job blocks completion of its modernization stage but does not claim GitHub
+merge enforcement before activation.
+
+Immediately before that live switch, every intended required context must be terminal and
+successful together on the unchanged activation pull request head. Historical passes from other
+pull requests or earlier revisions cannot be combined, and no context is activated piecemeal.
+
 ### `.github/pull_request_template.md`
 
 The Amazon-style CR checklist. This is the highest value-per-minute item in the whole spec and
-has zero platform dependency. Sections: what changed and why; how it was tested; coverage;
-backward compatibility; **rollback plan**; runtime verification evidence.
+has zero platform dependency. It records workflow identity, risk, exact head SHA, affected
+contracts, what changed and why, testing, coverage, compatibility, **rollback and rollout plans**,
+runtime evidence, check/review states, and unavailable evidence.
 
 The rollback section is the one people leave out and the one Amazon's documented checklists
-specifically call for.
+specifically call for. Missing, stale, or unverifiable evidence is recorded as unavailable rather
+than interpreted as clean.
 
 ### `.github/CODEOWNERS`
 

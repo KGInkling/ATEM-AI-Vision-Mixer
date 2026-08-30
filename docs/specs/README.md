@@ -11,7 +11,7 @@ All five specs are written.
 | # | Spec | Covers | Depends on | Status |
 |---|---|---|---|---|
 | 1 | [`offline-switching-core`](offline-switching-core/) | Contracts, fake switcher, safety controller, rule-based director | — | Ready |
-| 2 | [`cicd-pipeline`](cicd-pipeline/) | GitHub Actions, rulesets, PR review process, Docker, promotion stages | — for the gate; 1 for coverage | Ready — Groups 1–8 |
+| 2 | [`cicd-pipeline`](cicd-pipeline/) | GitHub Actions, rulesets, PR review process, Docker, promotion stages | — for the gate; 1 for coverage | Foundation and evidence baseline implemented; CodeQL/review-gate groups pending |
 | 3 | [`perception`](perception/) | Capture interface, file source, tiles, feed health, motion, VAD, people, framing | 1 | Ready |
 | 4 | [`llm-directors`](llm-directors/) | Local LLM (Ollama) + AWS Bedrock director tiers | 1, helped by 3 | Ready |
 | 5 | [`hardware-bringup`](hardware-bringup/) | Real `pyatem` driver, DeckLink capture, bench-test checklist | 1, 3 | Blocked on hardware (~Sept 2026) |
@@ -120,6 +120,12 @@ GitHub Actions CI (ruff + pytest + coverage gates), repository rulesets so `main
 pushed to directly, an Amazon-style PR review checklist, Docker for reproducible builds and
 tests, and an Amazon-shaped promotion pipeline (alpha → beta → gamma → prod) built on GitHub
 Environments.
+
+The active modernization is staged: first add package, dependency, and real macOS evidence
+without changing required contexts; then observe default CodeQL; then add and shadow a manual
+exact-SHA Claude review; finally activate only the context names proven on real pull requests.
+The live ruleset continues to require `lint` and `test` until that final, separately authorized
+activation.
 
 ### Spec 3 — `perception`
 

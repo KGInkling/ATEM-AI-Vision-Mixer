@@ -24,11 +24,46 @@ WHEN a pull request is opened or updated
 THEN a workflow SHALL run linting, the full test suite, and the coverage gates, and SHALL report
 a pass/fail status check per job.
 
-WHEN any check fails
+WHEN a status check named by the active ruleset fails
 THEN the pull request SHALL NOT be mergeable.
+
+WHEN an evidence-only check fails or is unavailable before activation
+THEN the modernization task SHALL NOT be considered complete and that context SHALL NOT be added
+to branch protection, even though the current ruleset does not yet enforce it.
 
 CI SHALL complete in under 5 minutes for the offline switching core, so it does not discourage
 small pull requests.
+
+### Requirement 1a: Deterministic evidence expands before enforcement
+
+CI SHALL build both the source distribution and wheel, install the wheel in a clean environment,
+and import the installed package from outside the repository checkout.
+
+WHEN a pull request changes declared dependencies
+THEN a pull-request-only dependency review SHALL fail for moderate-or-higher vulnerabilities in
+runtime dependencies.
+
+WHEN the macOS integration job runs
+THEN it SHALL install the `perception` and `dev` dependency groups, run the full test suite, and
+report skip reasons.
+
+WHEN the PyAV-backed recorded-media integration test is collected on macOS
+THEN it SHALL NOT skip merely because PyAV or NumPy was not installed.
+
+Every third-party action used by `ci.yml` SHALL be pinned to a reviewed full commit SHA with a
+readable release comment. Moving major-version tags are discovery inputs, not executable pins.
+
+New deterministic checks SHALL coexist with the currently required `lint` and `test` contexts
+until the final activation task. No new context SHALL be added to branch protection piecemeal.
+
+Immediately before live activation, every context intended for the new required list SHALL be
+terminal and successful together on the unchanged activation pull request's exact head SHA.
+Evidence from different pull requests, an earlier SHA, or a run before a workflow changed SHALL
+NOT satisfy this requirement. Missing, stale, or disjoint evidence SHALL block activation.
+
+WHEN a new context is proposed for branch protection
+THEN that activation SHALL be a separate reviewed change using only the context name observed on
+that unchanged activation head.
 
 ## Requirement 2: `main` is protected
 
@@ -85,6 +120,12 @@ The repository SHALL provide a pull request template carrying an explicit review
 The checklist SHALL cover, at minimum: what changed and why, test coverage for the change,
 whether the change is backward compatible, how it would be rolled back, and what was verified
 at runtime.
+
+The checklist SHALL also record the workflow ID, risk tier, exact head SHA, reviewer-ready commit
+range, affected contracts, check and review states, rollout boundary, and unavailable evidence.
+
+WHEN evidence is missing, stale, or cannot be verified against the recorded head SHA
+THEN the checklist SHALL report it as unavailable rather than clean.
 
 This is the transferable part of Amazon's process. The Builders' Library documents that Amazon
 reviewers work from **custom per-team written checklists** evaluating not only correctness but

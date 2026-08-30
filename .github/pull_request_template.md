@@ -1,3 +1,16 @@
+## Workflow identity
+
+<!-- Bind the change and every reported result to one reviewable revision. -->
+
+- Workflow ID:
+- Risk tier (`green`, `yellow`, or `red`):
+- Exact head SHA:
+- Base branch:
+- Reviewer-ready commit range:
+- Affected contracts:
+
+- [ ] The exact head SHA above matches the current pull request head.
+
 ## What changed and why
 
 ### What changed
@@ -66,11 +79,41 @@ Select one:
 
 Runtime verification details:
 
+## Check and review evidence
+
+<!-- Use pending, passed, failed, or unavailable. Missing or stale evidence is unavailable, never passed. -->
+
+| Evidence | Status | Exact SHA or unavailable reason |
+|---|---|---|
+| Required GitHub checks |  |  |
+| Code review |  |  |
+| Release readiness |  |  |
+| Session AI |  |  |
+| Human ready/merge decision |  |  |
+
+- [ ] Every result above belongs to the exact head SHA recorded in this template.
+- [ ] Missing, stale, or unverifiable results are marked unavailable.
+
+## Rollout plan
+
+<!-- State what becomes active on merge, how it is verified, and any later activation boundary. -->
+
+- [ ] The rollout steps and post-change verification are concrete.
+- [ ] This pull request has no live activation, with an explanation below.
+
+Rollout steps or explanation:
+
+## Unavailable evidence
+
+<!-- Name unavailable checks, environments, hardware, accounts, or external owners and their impact. -->
+
+Unavailable evidence and resulting blocker or limitation:
+
 ## Final review checklist
 
 - [ ] The pull request is limited to one coherent task group.
 - [ ] The implementation follows the approved requirements and design.
 - [ ] Failure behavior and operational risk were considered.
 - [ ] Documentation was updated where users or operators need it.
+- [ ] External activation or mutation has separate explicit authorization.
 - [ ] No secrets, credentials, logs, generated media, or scratch files were committed.
-

@@ -25,6 +25,62 @@ See `docs/specs/README.md` for the full cross-spec implementation order.
 
 ---
 
+## Active modernization sequence
+
+The original task groups below delivered the current CI, coverage, Docker, template, and active
+ruleset foundation. Modernize that live system in three independently reviewable pull requests;
+do not combine their activation boundaries.
+
+### Modernization task group 1: CI evidence baseline (R1a, R4)
+
+- Preserve the current `lint` and coverage-gated `test` behavior.
+- Pin every third-party action in `ci.yml` to a reviewed full commit SHA with its release in a
+  comment.
+- Add `build`: create the sdist and wheel, install the wheel without dependencies in a clean
+  environment, leave the checkout, and prove a representative installed module is imported.
+- Add pull-request-only `dependency-review` using GitHub's official action. Fail on
+  moderate-or-higher runtime vulnerabilities without adding comment-write permission.
+- Change the non-required macOS `integration` job to install `.[perception,dev]`, verify PyAV and
+  NumPy imports, run the full suite, and report skip reasons.
+- Extend the pull-request template with workflow/risk/SHA identity, affected contracts,
+  check/review status, rollout, rollback, and unavailable-evidence fields.
+- Update this specification and the roadmap without claiming later modernization groups landed.
+- Run actionlint, Ruff, the full tests without cache writes, an sdist/wheel clean-install proof,
+  and the global mechanical gate.
+- On the draft pull request, bind every check to the exact head SHA and confirm the PyAV
+  integration did not skip because its dependency was absent.
+
+Do not edit the committed or live ruleset in this group. The new contexts are evidence only. A
+failed or unavailable evidence job blocks completion of this group, but it is not yet a
+branch-protection claim.
+
+### Checkpoint: observe CodeQL
+
+After modernization task group 1 is merged, obtain explicit authorization to enable GitHub
+default CodeQL for Python and GitHub Actions. Record its real context names on `main` and a pull
+request before considering enforcement. Return to planning if default setup requires a custom
+workflow or another owner.
+
+### Modernization task group 2: manual Claude review gate
+
+Add the repository guidance, stable review prompt, and manual exact-SHA Claude workflow. Keep the
+old automatic and on-demand workflows while the replacement is shadowed. A successful review must
+publish visible marked evidence for the unchanged draft-PR head; every missing or stale path is a
+failure or unavailable result.
+
+### Modernization task group 3: review gate activation
+
+Only after the manual reviewer and every intended deterministic, security, and review context are
+terminal and successful together on the unchanged activation pull request head, remove the old
+automatic Claude workflow and update branch protection with the names observed on that exact SHA.
+Historical, stale, missing, or disjoint evidence blocks activation; do not activate contexts
+piecemeal. Preserve active enforcement, strict checks, an empty bypass list, and the prior
+`lint`/`test` context list as the rollback value. Live mutation requires separate authorization.
+
+---
+
+## Delivered foundation task groups
+
 ## Task Group 1: Verify the starting state
 
 - Confirm the repo is still **public**: `gh repo view --json visibility`. If it has gone
@@ -45,8 +101,9 @@ See `docs/specs/README.md` for the full cross-spec implementation order.
 - Two jobs, so they surface as separate status checks: **`lint`** and **`test`**.
 - Set `permissions: contents: read` at workflow level, and a `concurrency` group that cancels
   superseded PR runs.
-- Pin: `actions/checkout@v7`, `actions/setup-python@v7`. Use `setup-python`'s built-in
-  `cache: 'pip'` — do **not** add a separate `actions/cache` step.
+- The historical bootstrap selected `actions/checkout@v7` and `actions/setup-python@v7` and used
+  `setup-python`'s built-in `cache: 'pip'`. The modernization group above replaces those moving
+  tags with reviewed full SHAs; do **not** add a separate `actions/cache` step.
 - Set `fetch-depth: 0` on the `test` job's checkout. `diff-cover` needs history; without it the
   patch-coverage numbers are garbage.
 - `lint`: `ruff check .` and `ruff format --check .`.
