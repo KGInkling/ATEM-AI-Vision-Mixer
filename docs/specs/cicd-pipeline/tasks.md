@@ -56,17 +56,55 @@ branch-protection claim.
 
 ### Checkpoint: observe CodeQL
 
-After modernization task group 1 is merged, obtain explicit authorization to enable GitHub
-default CodeQL for Python and GitHub Actions. Record its real context names on `main` and a pull
-request before considering enforcement. Return to planning if default setup requires a custom
-workflow or another owner.
+Completed on August 30, 2026 after explicit authorization. GitHub default setup uses the default
+query suite, standard runner, and weekly schedule for Python and GitHub Actions. The initial
+`Analyze (python)` and `Analyze (actions)` jobs passed on `main`; record their behavior on the next
+real pull request before considering enforcement. Default setup required no custom workflow.
 
 ### Modernization task group 2: manual Claude review gate
 
-Add the repository guidance, stable review prompt, and manual exact-SHA Claude workflow. Keep the
-old automatic and on-demand workflows while the replacement is shadowed. A successful review must
-publish visible marked evidence for the unchanged draft-PR head; every missing or stale path is a
-failure or unavailable result.
+- Add a root `AGENTS.md` under 60 nonblank lines covering architecture, validation, privacy,
+  delivery, the exact review sequence, and stop boundaries.
+- Add `.github/review-prompts/claude.md` with consequential-defect scope, false-positive
+  exclusions, no-edit/no-execution/no-credential rules, output vocabulary, and fixed marker.
+- Add `.github/workflows/claude-review.yml`, manual dispatch only, with string `pr_number` and
+  `head_sha` inputs.
+- Preflight from the default branch before status or model use. Reject malformed, closed,
+  non-draft, forked, wrong-base, stale, and already-reviewed inputs.
+- Split pending status, read-only model, and publication across separate jobs. Keep the trusted
+  base at the workspace root and the frozen head under `pr-head/`; precompute the merge-base diff.
+- Supply the validated diff and safe-text snapshot directly under bare `dontAsk` mode, with
+  filesystem, command, and MCP tools disabled; no access to the raw checkout or Git config.
+- Fail before model use for debug logging, binary/symlink/submodule changes, sensitive paths,
+  unallowlisted extensions, or credential markers anywhere in the supplied context. Disable rename
+  detection so both old and new paths are checked. Supply a full sanitized safe-text snapshot for
+  caller tracing, never raw `pr-head/`, PR prose, comments, media, or credentials.
+- Require schema-valid output for the exact SHA. A no-model publisher creates and verifies one
+  marked PR review before setting `claude-review` success; every missing or stale path is error,
+  pending, failed, or unavailable.
+- Extend the pull request template with review cycle/profile, scope fingerprint, exact scope and
+  exclusions, ordered walkthrough, CodeQL, manual-review, AWS, Session AI, and human-decision
+  evidence.
+- Add `.gitmessage` for problem/result/validation/rollout/rollback/review identity and document
+  `git config commit.template .gitmessage`; do not add a commit hook.
+- Update the CI/CD specification and `HANDOFF.md`. Do not change application source or tests.
+- Run actionlint, Ruff, formatting, the full tests, package build and clean install, permission and
+  untrusted-input inspection, safe preflight failure reproductions, and the global mechanical gate.
+
+Keep `claude-code-review.yml` and `claude.yml` unchanged so old and new paths coexist. Open one
+task-owned draft pull request only after explicit authorization; the new dispatch becomes trusted
+and available only after this task is merged.
+
+### Checkpoint: shadow the manual reviewer
+
+- Privately regenerate `CLAUDE_CODE_OAUTH_TOKEN` from the intended school Enterprise account.
+- Dispatch a stale SHA against an open same-repository draft and prove no pending status or model
+  run occurs.
+- Dispatch the exact SHA once. Verify one model run, one marked review object bound to that commit,
+  unchanged-head checks, and terminal `claude-review` commit status whose target URL names the
+  manual workflow run. Do not substitute the legacy CheckRun with the same display name.
+- Record deterministic and CodeQL checks plus manual Claude evidence on the same head. Do not
+  continue to activation when any stream is stale, missing, failed, or unavailable.
 
 ### Modernization task group 3: review gate activation
 

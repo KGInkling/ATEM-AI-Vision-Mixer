@@ -3,10 +3,14 @@
 <!-- Bind the change and every reported result to one reviewable revision. -->
 
 - Workflow ID:
+- Review cycle (`1`, `2`, or `3`; leave pending before Review starts):
+- Review profile (`core` or `full`):
 - Risk tier (`green`, `yellow`, or `red`):
 - Exact head SHA:
 - Base branch:
+- Base SHA:
 - Reviewer-ready commit range:
+- Scope fingerprint:
 - Affected contracts:
 
 - [ ] The exact head SHA above matches the current pull request head.
@@ -20,6 +24,16 @@
 ### Why
 
 <!-- Explain the problem this solves and why this change is needed now. -->
+
+## Exact scope and exclusions
+
+<!-- List the committed paths in scope and the user-owned, deferred, or unrelated paths excluded. -->
+
+- Changed paths:
+- Explicit exclusions:
+
+- [ ] The pull request contains one coherent committed task scope.
+- [ ] Uncommitted and unrelated user work is excluded.
 
 ## How it was tested
 
@@ -79,20 +93,31 @@ Select one:
 
 Runtime verification details:
 
+## Reviewer walkthrough
+
+<!-- Give reviewers a short, ordered path through owners, contracts, failure behavior, and proof. -->
+
+1. Canonical owner and intended behavior:
+2. Trust, state, or compatibility boundary:
+3. Failure handling and rollback:
+4. Regression and runtime evidence:
+
 ## Check and review evidence
 
 <!-- Use pending, passed, failed, or unavailable. Missing or stale evidence is unavailable, never passed. -->
 
 | Evidence | Status | Exact SHA or unavailable reason |
 |---|---|---|
-| Required GitHub checks |  |  |
-| Code review |  |  |
-| Release readiness |  |  |
-| Session AI |  |  |
+| GitHub checks |  |  |
+| CodeQL (`actions` and `python`) |  |  |
+| Manual general code review |  |  |
+| AWS release readiness |  |  |
+| Session AI (`core` or `full`) |  |  |
 | Human ready/merge decision |  |  |
 
 - [ ] Every result above belongs to the exact head SHA recorded in this template.
 - [ ] Missing, stale, or unverifiable results are marked unavailable.
+- [ ] Every candidate finding has a terminal disposition before human-ready state.
 
 ## Rollout plan
 
@@ -116,4 +141,5 @@ Unavailable evidence and resulting blocker or limitation:
 - [ ] Failure behavior and operational risk were considered.
 - [ ] Documentation was updated where users or operators need it.
 - [ ] External activation or mutation has separate explicit authorization.
+- [ ] The pull request remains draft until integrated review is complete.
 - [ ] No secrets, credentials, logs, generated media, or scratch files were committed.

@@ -113,6 +113,63 @@ conversation resolution, and linear history requirements.
 WHEN a collaborator is added later
 THEN raising the approval count to 1 SHALL be a single-field change to the ruleset.
 
+### Requirement 3a: Manual review is exact, visible, and fail-closed
+
+The repository SHALL provide one manually dispatched general code-review workflow with scalar
+pull-request-number and expected-head-SHA inputs.
+
+BEFORE any model credential is available or any status is written
+THEN the workflow SHALL reject malformed input, a non-default workflow ref, a closed or non-draft
+pull request, a fork, a non-default base, a stale head SHA, and a duplicate marked review.
+
+The model job SHALL read one frozen same-repository draft pull request. It SHALL use trusted
+base-branch instructions, keep the exact head in a separate directory, consume a precomputed diff,
+and receive no repository or GitHub write capability.
+
+The model job SHALL NOT edit files, execute project code or configuration, run tests or builds,
+access credentials, create fixes, or publish comments, reviews, or statuses.
+
+WHEN GitHub runner debug logging is enabled
+THEN the model job SHALL stop before the Claude credential is supplied. The action step SHALL also
+override `ACTIONS_STEP_DEBUG=false` so full model/tool output cannot enter public logs.
+
+WHEN the frozen diff includes a binary, symlink, submodule, sensitive filename or directory,
+non-allowlisted extension, image/audio/video/transcript/generated-media path, or high-confidence
+credential marker
+THEN context preparation SHALL stop before model use and report that privacy boundary unavailable.
+
+The model SHALL receive only trusted base instructions, workflow-generated metadata and diff, and
+a sanitized full snapshot of safe allowlisted tracked text for caller/contract tracing, supplied
+directly as context with filesystem, command, and MCP tools disabled. It SHALL NOT receive
+`pr-head/` access. Credential-marker scanning SHALL cover the entire supplied context, including
+unchanged source and trusted instructions. Rename detection SHALL be disabled so both source and
+destination paths pass the privacy checks.
+
+WHEN preflight succeeds
+THEN a `claude-review` commit status SHALL become pending on the frozen head SHA before model use.
+
+WHEN the model returns schema-valid output for that same base/head pair and the pull request base
+and head remain unchanged
+THEN a separate no-model publisher SHALL create one marked GitHub review containing reviewer,
+reviewed SHA, verdict, mandatory summary, and any consequential findings.
+
+`claude-review=success` SHALL be published only after the workflow re-reads the pull request and
+the created review object and verifies its marker, author, commit ID, SHA, and verdict.
+
+`claude-review=success` SHALL attest that review evidence was published and verified; it SHALL NOT
+mean the verdict was clean, dispose findings, satisfy human approval, or authorize ready/merge.
+
+WHILE the legacy automatic workflow coexists with the replacement
+THEN manual evidence SHALL be verified through the commit-status API and its manual workflow run
+URL, not inferred from the legacy CheckRun that shares the `claude-review` display name.
+
+Missing credentials, model failure, timeout, malformed or mismatched output, publication failure,
+base or head movement, cancellation, or unverifiable evidence SHALL remain failed, error, pending,
+or unavailable; none SHALL be represented as clean.
+
+The old automatic Claude workflow and the on-demand Claude workflow SHALL remain unchanged until
+the manual replacement succeeds in a separately authorized shadow checkpoint.
+
 ## Requirement 4: An Amazon-style review checklist
 
 The repository SHALL provide a pull request template carrying an explicit review checklist.
@@ -122,10 +179,15 @@ whether the change is backward compatible, how it would be rolled back, and what
 at runtime.
 
 The checklist SHALL also record the workflow ID, risk tier, exact head SHA, reviewer-ready commit
-range, affected contracts, check and review states, rollout boundary, and unavailable evidence.
+range, review cycle and profile, scope fingerprint, affected contracts, exact scope and exclusions,
+ordered reviewer walkthrough, check and review states, rollout boundary, and unavailable evidence.
 
 WHEN evidence is missing, stale, or cannot be verified against the recorded head SHA
 THEN the checklist SHALL report it as unavailable rather than clean.
+
+The repository SHALL provide a commit-message template that prompts for a specific Conventional
+Commit subject, problem, resulting behavior, validation, rollout and rollback, and review identity.
+The template is guidance configured per clone; it SHALL NOT add a commit hook or bypass review.
 
 This is the transferable part of Amazon's process. The Builders' Library documents that Amazon
 reviewers work from **custom per-team written checklists** evaluating not only correctness but
