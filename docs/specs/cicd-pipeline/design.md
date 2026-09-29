@@ -68,44 +68,106 @@ bypass.
 
 ---
 
-## What already exists — do not assume a clean slate
+## Existing and staged review paths — do not assume a clean slate
 
-`.github/workflows/` is **not** empty. Two workflows were added before this spec was written and
-are live:
+The live repository already has deterministic CI, CodeQL default setup for `actions` and
+`python`, GitHub's Dependency Graph, and two Claude workflows; this task adds a third staged path:
 
-| Workflow | Trigger | What it does |
+| Workflow | Trigger | Role during migration |
 |---|---|---|
-| `claude-code-review.yml` | `pull_request` (opened, synchronize, ready_for_review, reopened) | Automated Claude review pass on every PR |
-| `claude.yml` | issue/PR comments, reviews, issues opened | On-demand Claude, invoked by mentioning it in a comment |
+| `claude-code-review.yml` | pull request events | Legacy automatic path; keep unchanged until replacement proof |
+| `claude.yml` | issue and pull request mentions | On-demand assistance; keep unchanged |
+| `claude-review.yml` | manual dispatch | New exact-SHA general-review evidence |
 
-Both authenticate with a `CLAUDE_CODE_OAUTH_TOKEN` repository secret, which is already
-configured — verified by successful runs on three separate pull requests.
+The legacy automatic workflow cannot be review evidence. Its plugin invocation omits
+`--comment`, so successful runs can leave no visible result. The official plugin also skips draft
+pull requests, while this repository deliberately reviews drafts. A required context with those
+semantics would be theatre: it could pass without a visible review and could consume the OAuth
+subscription repeatedly on every synchronization.
 
-Two consequences:
+The new manual workflow therefore uses a stable repository prompt and schema-valid structured
+output rather than the draft-skipping plugin command. Old and new paths coexist for shadow proof.
+The automatic workflow is removed only in the final activation task; the on-demand workflow stays.
 
-**1. `ci.yml` is added alongside these, not into an empty directory.** Nothing here replaces
-them.
-
-**2. This is the "second reviewer" the solo-developer problem said was impossible — partly.**
-Requirement 3 notes that GitHub will not let a PR author approve their own PR, so a real approval
-gate is unattainable alone. `claude-code-review` does not solve that (an Action cannot satisfy a
-required *human* approval), but it does supply the thing that approval was a proxy for: a second
-pass over the diff that the author did not write. Combined with the PR-template checklist, that
-covers most of what the Amazon CR ritual actually delivers.
-
-**Do not make `Claude Code Review` a required status check.** It reports success regardless of
-what it finds — it comments rather than failing — so requiring it would add a merge gate that
-never blocks anything, while adding its runtime to every merge (10 minutes on a large diff, in
-the observed runs). Worse, if the OAuth token ever expires, every PR in the repo becomes
-unmergeable for a reason unrelated to code quality. Keep it advisory and let a human read its
-comments.
-
-The required checks stay `lint` and `test` — deterministic, fast, and meaningful when they
-fail. GitHub may display these as `ci / lint` and `ci / test`, but the workflow name is not part
-of a ruleset status-check context. [GitHub's ruleset troubleshooting documentation](https://docs.github.com/en/repositories/configuring-branches-and-merges-in-your-repository/managing-rulesets/troubleshooting-rules)
-specifies the workflow format as the job name only.
+The live ruleset remains active, strict, bypass-free, and limited to `lint` and `test` throughout
+this task. No new review or security context becomes required before the separately authorized
+activation change. GitHub rulesets use the job or status context name, not the displayed workflow
+prefix.
 
 ## Components / changes
+
+### `.github/workflows/claude-review.yml`
+
+Manual dispatch takes a pull request number and expected 40-character head SHA. Four jobs split
+trust and side effects:
+
+| Job | Credential and permission boundary | Responsibility |
+|---|---|---|
+| `preflight` | pull requests read | reject malformed, non-default-ref, closed, non-draft, forked, wrong-base, stale, or duplicate input |
+| `mark-pending` | statuses write; no model secret | publish `claude-review=pending` on the frozen SHA |
+| `review` | contents/PR read plus Claude auth | trusted base at root, head under `pr-head/`, precomputed merge-base diff and source context, no model tools, structured output |
+| `publish` | PR/status write; no model secret or checkout | recheck the head, publish and verify a marked review object, then set success or error |
+
+The model never receives GitHub write permission and cannot run Bash, project code, tests, builds,
+package managers, hooks, or repository configuration. Pull request artifacts remain untrusted
+data. The exact base and head are separate full-history checkouts; reviewer instructions come from
+the trusted base. A workflow-controlled step computes the merge base and diff before model use.
+Claude runs in bare `dontAsk` mode with no filesystem, command, or MCP tools. The workflow supplies
+trusted instructions followed by an explicitly untrusted JSON diff and source snapshot through
+`--append-system-prompt-file`. A read allowlist alone would not isolate context: `dontAsk` still
+allows ordinary workspace reads. The pinned action's argument parser also drops empty flag values,
+so `--tools "Read"` limits the built-in set and `--disallowedTools "Read,mcp__*"` denies that remaining
+tool and every MCP tool. No custom execution or permission helper is introduced.
+
+The pull request title, body, comments, and prior review text are not forwarded to the model.
+Binary changes, sensitive filenames/directories, non-allowlisted extensions, and symlink/submodule
+Git modes on either side of the diff stop context preparation before the Claude secret is used.
+Diffs disable rename detection so an old sensitive path cannot disappear behind a safe new name.
+The runner serializes the full safe allowlisted tracked-text snapshot, omitting unchanged sensitive
+or non-text paths while failing if such a path changed. It then scans the entire assembled context
+for high-confidence credential markers, including unchanged source and trusted instructions.
+This permits caller and contract tracing without model access to the raw checkout or Git config.
+
+These controls follow the [Claude permission semantics](https://code.claude.com/docs/en/permissions)
+and [CLI tool flags](https://code.claude.com/docs/en/cli-reference). The pinned action's
+[`parse-sdk-options.ts`](https://github.com/anthropics/claude-code-action/blob/781d62e9d5fbd78b24dcdfd42858332d485fe462/base-action/src/parse-sdk-options.ts)
+is the version-specific argument contract.
+
+The publisher accepts only schema-valid output whose `base_sha` and `reviewed_sha` equal the frozen
+scope. It requires `clean` with zero findings or `findings` with at least one consequential
+finding. A GitHub review is posted with marker `<!-- manual-claude-review:v1 -->`, reviewer, base
+SHA, commit ID/head SHA, verdict, summary, and findings. The workflow validates every schema field
+and limit, then re-reads both the pull request and created review, requiring the complete published
+body to match, before publishing `claude-review=success`. Model failure, malformed output, publication
+failure, or base/head movement produces error or unavailable evidence, never clean.
+
+Status success means the marked review evidence exists and is current. It is not a clean verdict
+or approval: a `findings` review still requires independent verification and terminal disposition
+before human-ready state.
+
+Publication is idempotent for failed-job retries: the publisher reuses and re-verifies an existing
+marked review for the same base/head pair before creating one, so a transient status failure cannot
+duplicate the visible review or spend another model run.
+
+During coexistence, the legacy workflow also emits a CheckRun named `claude-review`. A combined
+check rollup is therefore not proof of the manual path. Shadow verification must read the commit
+statuses endpoint, match the manual workflow run URL, and verify the marked review object on the
+same SHA. The legacy workflow is removed before the manual status context is added to protection.
+
+The action pins are `actions/checkout` v7.0.1 at
+`3d3c42e5aac5ba805825da76410c181273ba90b1` and the official Claude Code Action v1 commit
+`781d62e9d5fbd78b24dcdfd42858332d485fe462`. The workflow rejects `runner.debug` before model use
+and forces `ACTIONS_STEP_DEBUG=false` at the action boundary because debug mode otherwise enables
+full Claude output in public logs.
+
+### Review instructions and templates
+
+`AGENTS.md` is the concise repository guide for architecture, validation, privacy, delivery, and
+the exact review sequence. `.github/review-prompts/claude.md` is the trusted consequential-defect
+contract for the manual reviewer. The pull request template records cycle/profile, fingerprint,
+scope and exclusions, reviewer walkthrough, terminal evidence, rollout, rollback, and separate
+human approval. `.gitmessage` supplies parallel commit guidance and is enabled per clone with
+`git config commit.template .gitmessage`; it adds no hook or enforcement path.
 
 ### `.github/workflows/ci.yml`
 

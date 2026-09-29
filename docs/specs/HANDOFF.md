@@ -60,6 +60,12 @@ self-contained — an agent with none of the design conversation should be able 
 >   raise it instead of special-casing.
 > - **Flag anything you cannot verify.** Do not assert that something works if you have not run
 >   it.
+> - **Use the repository templates.** Configure `.gitmessage` once per clone, complete the pull
+>   request template, and keep exact scope, exclusions, validation, rollout, and rollback visible.
+> - **Keep workflow phases separate.** Implementation owns coherent task commits and stops before
+>   integrated Review. Review does not implement its own fixes.
+> - **Bind review to one revision.** Every check, review, and readiness report must name the same
+>   exact pull request head SHA. Missing or stale evidence is unavailable, never clean.
 >
 > **Environment:** Python 3.11.9, macOS, existing venv at `.venv/`. The repo is public on GitHub
 > at `KGInkling/ATEM-AI-Vision-Mixer`, default branch `main`.
@@ -91,6 +97,22 @@ three or four groups and land them together.
 Why: a 2,000-line pull request gets rubber-stamped, which defeats the purpose of having a review
 gate. Small, focused change requests are the norm this project is modelled on, and the review
 discipline in spec 2 only pays off if the diffs are actually reviewable.
+
+### Draft pull request review sequence
+
+Every task pull request stays draft while the following evidence is collected for one unchanged
+head SHA:
+
+1. GitHub lint, test, build, integration, dependency, and CodeQL checks.
+2. The manually dispatched general code review and its marked `claude-review` evidence.
+3. Manual AWS DevOps Agent release readiness using the existing public PR URL.
+4. Risk-scaled local Session AI and terminal finding dispositions.
+5. A separate informed human decision to mark ready or merge.
+
+The legacy automatic Claude workflow is not exact-SHA review evidence. Do not treat its job exit
+status as a clean review. Never launch the manual reviewer for a closed, non-draft, forked,
+wrong-base, stale, or already-reviewed revision. Review fixes return to a fresh Implementation
+phase and reuse the same draft PR only after separate push authorization.
 
 ### Hard stop at the end of every spec
 

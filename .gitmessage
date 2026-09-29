@@ -1,0 +1,19 @@
+# <type>[optional scope]: <imperative exact outcome>
+#
+# Problem:
+# Why is the current behavior or evidence insufficient?
+#
+# Result:
+# What observable behavior changes, and which contracts are affected?
+#
+# Scope and exclusions:
+# What coherent behavior is committed, and what related work is deliberately deferred?
+#
+# Validation:
+# - <exact command or external check>: <result>
+#
+# Rollout and rollback:
+# What becomes active, what remains unchanged, and how is this reverted?
+#
+# Review identity:
+# Workflow ID, risk tier, and any exact base/head or compatibility constraint.
