@@ -11,7 +11,7 @@ All five specs are written.
 | # | Spec | Covers | Depends on | Status |
 |---|---|---|---|---|
 | 1 | [`offline-switching-core`](offline-switching-core/) | Contracts, fake switcher, safety controller, rule-based director | — | Ready |
-| 2 | [`cicd-pipeline`](cicd-pipeline/) | GitHub Actions, rulesets, PR review process, Docker, promotion stages | — for the gate; 1 for coverage | Foundation and evidence baseline implemented; CodeQL/review-gate groups pending |
+| 2 | [`cicd-pipeline`](cicd-pipeline/) | GitHub Actions, rulesets, PR review process, Docker, promotion stages | — for the gate; 1 for coverage | Evidence baseline and manual review workflow merged; CodeQL enabled; shadow verification and gate activation pending |
 | 3 | [`perception`](perception/) | Capture interface, file source, tiles, feed health, motion, VAD, people, framing | 1 | Ready |
 | 4 | [`llm-directors`](llm-directors/) | Local LLM (Ollama) + AWS Bedrock director tiers | 1, helped by 3 | Ready |
 | 5 | [`hardware-bringup`](hardware-bringup/) | Real `pyatem` driver, DeckLink capture, bench-test checklist | 1, 3 | Blocked on hardware (~Sept 2026) |
@@ -121,11 +121,19 @@ pushed to directly, an Amazon-style PR review checklist, Docker for reproducible
 tests, and an Amazon-shaped promotion pipeline (alpha → beta → gamma → prod) built on GitHub
 Environments.
 
-The active modernization is staged: first add package, dependency, and real macOS evidence
-without changing required contexts; then observe default CodeQL; then add and shadow a manual
-exact-SHA Claude review; finally activate only the context names proven on real pull requests.
-The live ruleset continues to require `lint` and `test` until that final, separately authorized
-activation.
+The evidence baseline landed in [PR #21](https://github.com/KGInkling/ATEM-AI-Vision-Mixer/pull/21),
+and the manual exact-SHA Claude review workflow landed in
+[PR #22](https://github.com/KGInkling/ATEM-AI-Vision-Mixer/pull/22). Python and Actions CodeQL,
+lint, tests, package build, dependency review, and macOS integration passed on PR #22's head.
+
+The next checkpoint is a live shadow test of the manual workflow against an open draft PR:
+reject a stale head without invoking Claude, then verify one marked review and its commit status
+on the exact current head. The legacy automatic review's successful check is not that evidence.
+See the [shadow checkpoint](cicd-pipeline/tasks.md#checkpoint-shadow-the-manual-reviewer).
+
+Both legacy Claude workflows remain during this checkpoint. The live ruleset still requires
+only `lint` and `test`. Activating additional required contexts is a separate authorized change
+after every intended context passes together on the activation PR's unchanged head.
 
 ### Spec 3 — `perception`
 
