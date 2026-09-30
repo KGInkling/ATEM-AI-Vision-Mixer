@@ -389,7 +389,7 @@ jobs:
             command, or external-service tools. Return only the structured result required by the
             schema. Do not post to GitHub.
           claude_args: >-
-            --bare
+            --safe-mode
             --max-turns 12
             --permission-mode dontAsk
             --tools "Read"
