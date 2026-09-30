@@ -112,8 +112,13 @@ The model never receives GitHub write permission and cannot run Bash, project co
 package managers, hooks, or repository configuration. Pull request artifacts remain untrusted
 data. The exact base and head are separate full-history checkouts; reviewer instructions come from
 the trusted base. A workflow-controlled step computes the merge base and diff before model use.
-Claude runs in bare `dontAsk` mode with no filesystem, command, or MCP tools. The workflow supplies
-trusted instructions followed by an explicitly untrusted JSON diff and source snapshot through
+Claude runs with `--safe-mode` and `dontAsk`, with no filesystem, command, or MCP tools. Safe mode
+disables repository customizations while preserving normal authentication. `--bare` cannot be used
+with the subscription token: it ignores `CLAUDE_CODE_OAUTH_TOKEN` and would require an API key.
+This distinction is documented in [Claude authentication](https://code.claude.com/docs/en/authentication)
+and was reproduced with the pinned CLI 2.1.257 using a fixture token, without a model request.
+The workflow supplies trusted instructions followed by an explicitly untrusted JSON diff and
+source snapshot through
 `--append-system-prompt-file`. A read allowlist alone would not isolate context: `dontAsk` still
 allows ordinary workspace reads. The pinned action's argument parser also drops empty flag values,
 so `--tools "Read"` limits the built-in set and `--disallowedTools "Read,mcp__*"` denies that remaining

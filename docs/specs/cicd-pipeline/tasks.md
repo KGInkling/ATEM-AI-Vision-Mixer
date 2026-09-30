@@ -73,7 +73,7 @@ real pull request before considering enforcement. Default setup required no cust
   non-draft, forked, wrong-base, stale, and already-reviewed inputs.
 - Split pending status, read-only model, and publication across separate jobs. Keep the trusted
   base at the workspace root and the frozen head under `pr-head/`; precompute the merge-base diff.
-- Supply the validated diff and safe-text snapshot directly under bare `dontAsk` mode, with
+- Supply the validated diff and safe-text snapshot directly under `--safe-mode` and `dontAsk`, with
   filesystem, command, and MCP tools disabled; no access to the raw checkout or Git config.
 - Fail before model use for debug logging, binary/symlink/submodule changes, sensitive paths,
   unallowlisted extensions, or credential markers anywhere in the supplied context. Disable rename
