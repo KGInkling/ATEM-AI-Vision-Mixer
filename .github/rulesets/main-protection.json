@@ -41,6 +41,21 @@
           },
           {
             "context": "test"
+          },
+          {
+            "context": "build"
+          },
+          {
+            "context": "integration"
+          },
+          {
+            "context": "dependency-review"
+          },
+          {
+            "context": "CodeQL"
+          },
+          {
+            "context": "claude-review"
           }
         ]
       }
