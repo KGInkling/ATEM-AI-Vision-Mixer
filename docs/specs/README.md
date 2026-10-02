@@ -11,7 +11,7 @@ All five specs are written.
 | # | Spec | Covers | Depends on | Status |
 |---|---|---|---|---|
 | 1 | [`offline-switching-core`](offline-switching-core/) | Contracts, fake switcher, safety controller, rule-based director | — | Ready |
-| 2 | [`cicd-pipeline`](cicd-pipeline/) | GitHub Actions, rulesets, PR review process, Docker, promotion stages | — for the gate; 1 for coverage | Evidence baseline and manual review workflow merged; CodeQL enabled; shadow verification and gate activation pending |
+| 2 | [`cicd-pipeline`](cicd-pipeline/) | GitHub Actions, rulesets, PR review process, Docker, promotion stages | — for the gate; 1 for coverage | Manual review validated; automatic review retired in this revision; final activation evidence and live switch pending |
 | 3 | [`perception`](perception/) | Capture interface, file source, tiles, feed health, motion, VAD, people, framing | 1 | Ready |
 | 4 | [`llm-directors`](llm-directors/) | Local LLM (Ollama) + AWS Bedrock director tiers | 1, helped by 3 | Ready |
 | 5 | [`hardware-bringup`](hardware-bringup/) | Real `pyatem` driver, DeckLink capture, bench-test checklist | 1, 3 | Blocked on hardware (~Sept 2026) |
@@ -126,14 +126,15 @@ and the manual exact-SHA Claude review workflow landed in
 [PR #22](https://github.com/KGInkling/ATEM-AI-Vision-Mixer/pull/22). Python and Actions CodeQL,
 lint, tests, package build, dependency review, and macOS integration passed on PR #22's head.
 
-The next checkpoint is a live shadow test of the manual workflow against an open draft PR:
-reject a stale head without invoking Claude, then verify one marked review and its commit status
-on the exact current head. The legacy automatic review's successful check is not that evidence.
-See the [shadow checkpoint](cicd-pipeline/tasks.md#checkpoint-shadow-the-manual-reviewer).
+The [shadow checkpoint](cicd-pipeline/tasks.md#checkpoint-shadow-the-manual-reviewer) passed:
+the manual workflow rejected a stale head without model use and published a verified clean review
+on the exact current head. The activation candidate then received its own marked clean review on
+[PR #25](https://github.com/KGInkling/ATEM-AI-Vision-Mixer/pull/25#pullrequestreview-5373652239).
 
-Both legacy Claude workflows remain during this checkpoint. The live ruleset still requires
-only `lint` and `test`. Activating additional required contexts is a separate authorized change
-after every intended context passes together on the activation PR's unchanged head.
+This revision retires the legacy automatic reviewer while retaining on-demand Claude. The
+committed candidate lists seven required contexts, but the live ruleset still requires only
+`lint` and `test`. Fresh evidence for the retirement revision and a separate approved live switch
+are required before the expanded context list is enforced.
 
 ### Spec 3 — `perception`
 

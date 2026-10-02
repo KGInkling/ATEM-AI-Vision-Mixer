@@ -68,31 +68,30 @@ bypass.
 
 ---
 
-## Existing and staged review paths — do not assume a clean slate
+## Review paths after legacy retirement
 
-The live repository already has deterministic CI, CodeQL default setup for `actions` and
-`python`, GitHub's Dependency Graph, and two Claude workflows; this task adds a third staged path:
+The repository has deterministic CI, CodeQL default setup for `actions` and `python`, GitHub's
+Dependency Graph, and two retained Claude workflows:
 
-| Workflow | Trigger | Role during migration |
+| Workflow | Trigger | Role |
 |---|---|---|
-| `claude-code-review.yml` | pull request events | Legacy automatic path; keep unchanged until replacement proof |
 | `claude.yml` | issue and pull request mentions | On-demand assistance; keep unchanged |
-| `claude-review.yml` | manual dispatch | New exact-SHA general-review evidence |
+| `claude-review.yml` | manual dispatch | Exact-SHA general-review evidence |
 
-The legacy automatic workflow cannot be review evidence. Its plugin invocation omits
-`--comment`, so successful runs can leave no visible result. The official plugin also skips draft
-pull requests, while this repository deliberately reviews drafts. A required context with those
-semantics would be theatre: it could pass without a visible review and could consume the OAuth
-subscription repeatedly on every synchronization.
+The retired automatic workflow omitted the plugin's `--comment` option and used a command that
+skipped draft pull requests. Its successful check could therefore lack a visible review. It also
+invoked Claude on repeated PR events rather than one deliberate request per frozen revision.
 
-The new manual workflow therefore uses a stable repository prompt and schema-valid structured
-output rather than the draft-skipping plugin command. Old and new paths coexist for shadow proof.
-The automatic workflow is removed only in the final activation task; the on-demand workflow stays.
+The manual workflow uses a stable repository prompt and schema-valid structured output rather
+than the draft-skipping plugin command. Both paths coexisted during shadow verification. The
+manual reviewer then produced a marked clean review on activation candidate PR #25 at head
+`79a8935a62b83253f1b4cc58ce8e08c5b42dbe9e`, permitting removal of the automatic workflow.
+The retirement revision still requires its own fresh CI, CodeQL, and manual-review evidence.
 
-The live ruleset remains active, strict, bypass-free, and limited to `lint` and `test` throughout
-this task. No new review or security context becomes required before the separately authorized
-activation change. GitHub rulesets use the job or status context name, not the displayed workflow
-prefix.
+The live ruleset remains active, strict, bypass-free, and limited to `lint` and `test` until
+activation. The committed candidate declares seven contexts, but no new context is required
+on GitHub before the separately authorized activation change. GitHub rulesets use the job or
+status context name, not the displayed workflow prefix.
 
 ## Components / changes
 
@@ -154,10 +153,10 @@ Publication is idempotent for failed-job retries: the publisher reuses and re-ve
 marked review for the same base/head pair before creating one, so a transient status failure cannot
 duplicate the visible review or spend another model run.
 
-During coexistence, the legacy workflow also emits a CheckRun named `claude-review`. A combined
-check rollup is therefore not proof of the manual path. Shadow verification must read the commit
+During coexistence, the legacy workflow also emitted a CheckRun named `claude-review`. Historical
+check rollups are therefore not proof of the manual path. Verification must read the commit
 statuses endpoint, match the manual workflow run URL, and verify the marked review object on the
-same SHA. The legacy workflow is removed before the manual status context is added to protection.
+same SHA. The legacy workflow is retired before the manual status context is added to protection.
 
 The action pins are `actions/checkout` v7.0.1 at
 `3d3c42e5aac5ba805825da76410c181273ba90b1` and the official Claude Code Action v1 commit
@@ -212,13 +211,12 @@ have a separately tracked same-process collision.
 
 ### Staged evidence activation
 
-This change adds evidence alongside the live gate. It does not edit the ruleset or make a new
-context required. After a draft pull request proves the exact `build`, `dependency-review`, and
-`integration` context names on one frozen head SHA, CodeQL is enabled and observed in a separate
-checkpoint. Manual Claude evidence is added in its own task group. Only the final activation task
-updates branch protection, with the prior `lint`/`test` context list retained for rollback. A
-failed evidence-only job blocks completion of its modernization stage but does not claim GitHub
-merge enforcement before activation.
+The evidence baseline, CodeQL setup, and manual review were delivered before enforcement.
+The committed ruleset now declares the activation candidate: `lint`, `test`, `build`,
+`integration`, `dependency-review`, `CodeQL`, and `claude-review`. Declaring this list does not
+apply it to GitHub. Only the separately authorized live switch updates branch protection,
+with the prior `lint`/`test` context list retained for rollback. A failed evidence-only job
+blocks completion of its stage without implying that GitHub already enforces it.
 
 Immediately before that live switch, every intended required context must be terminal and
 successful together on the unchanged activation pull request head. Historical passes from other
