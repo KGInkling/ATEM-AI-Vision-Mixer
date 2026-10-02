@@ -97,6 +97,11 @@ and available only after this task is merged.
 
 ### Checkpoint: shadow the manual reviewer
 
+Completed on the unchanged PR #23 head `ba4ddaba848b46a59dde87e1dffb44f2b65782c8`:
+[positive run](https://github.com/KGInkling/ATEM-AI-Vision-Mixer/actions/runs/36757590657)
+and [stale-SHA rejection](https://github.com/KGInkling/ATEM-AI-Vision-Mixer/actions/runs/36757896863).
+These are workflow-validation evidence, not substitutes for the final activation head's checks.
+
 - Privately regenerate `CLAUDE_CODE_OAUTH_TOKEN` from the intended school Enterprise account.
 - Dispatch a stale SHA against an open same-repository draft and prove no pending status or model
   run occurs.
@@ -107,6 +112,12 @@ and available only after this task is merged.
   continue to activation when any stream is stale, missing, failed, or unavailable.
 
 ### Modernization task group 3: review gate activation
+
+The candidate ruleset landed in PR #25. Its original head
+`79a8935a62b83253f1b4cc58ce8e08c5b42dbe9e` received a
+[marked clean manual review](https://github.com/KGInkling/ATEM-AI-Vision-Mixer/pull/25#pullrequestreview-5373652239)
+alongside passing CI and CodeQL. The legacy automatic reviewer can now be retired; the on-demand
+workflow remains. The retirement revision requires fresh final-head evidence before live activation.
 
 Only after the manual reviewer and every intended deterministic, security, and review context are
 terminal and successful together on the unchanged activation pull request head, remove the old

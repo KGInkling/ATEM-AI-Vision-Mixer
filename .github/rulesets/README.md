@@ -39,11 +39,13 @@ result. Keep both analyses passing.
 
 ### Before the live switch
 
-1. Keep the activation PR in draft. Run the manual reviewer on its frozen head and verify the
+1. Keep the final activation PR in draft. Run the manual reviewer on its frozen head and verify the
    marked review and commit status, including the manual workflow run URL.
-2. Only after that proof, remove `.github/workflows/claude-code-review.yml`. Keep the on-demand
-   `.github/workflows/claude.yml`. The legacy CheckRun also uses `claude-review`; it is not proof
-   of the manual status and must not remain when that context becomes required.
+2. The initial candidate received a marked clean manual review on
+   [PR #25](https://github.com/KGInkling/ATEM-AI-Vision-Mixer/pull/25#pullrequestreview-5373652239).
+   That prerequisite permits retiring `.github/workflows/claude-code-review.yml` in this
+   revision. The on-demand `.github/workflows/claude.yml` remains. The retired CheckRun shared
+   the `claude-review` name and must not be counted as the manual status.
 3. After any commit changes the head, rerun CI, CodeQL, and the manual reviewer. Every proposed
    required context must pass together on the final unchanged head. Do not combine results from
    different revisions, and do not mark ready or merge during this checkpoint.
