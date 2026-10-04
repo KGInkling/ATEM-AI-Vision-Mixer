@@ -6,6 +6,9 @@ An AI video switcher that picks the best shots for video feed
 See [Docker development environment](docs/DOCKER.md) for reproducible builds, tests, and the
 boundary between portable logic and host-only video hardware.
 
+See [Synthetic multiview footage](docs/MULTIVIEW.md) to generate 1080p 4-up/7-up recordings
+and crop configurations for testing perception without hardware.
+
 ## Emergency main-branch access
 
 Normal changes must reach `main` through a pull request. The `main-protection` ruleset has no
