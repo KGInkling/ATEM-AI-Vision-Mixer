@@ -9,6 +9,9 @@ boundary between portable logic and host-only video hardware.
 See [Synthetic multiview footage](docs/MULTIVIEW.md) to generate 1080p 4-up/7-up recordings
 and crop configurations for testing perception without hardware.
 
+See [Feed health and motion](docs/FEED_HEALTH.md) for local black/frozen-feed
+detection, quality defects, and the four-camera performance checkpoint.
+
 ## Emergency main-branch access
 
 Normal changes must reach `main` through a pull request. The `main-protection` ruleset has no
