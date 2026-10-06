@@ -62,7 +62,7 @@ jobs:
         run: |
           python -m pip install coverage diff-cover pytest pytest-cov
           if [ -f pyproject.toml ]; then
-            python -m pip install --editable .
+            python -m pip install --editable . opencv-contrib-python
           fi
 
       - name: Run the full test suite with coverage

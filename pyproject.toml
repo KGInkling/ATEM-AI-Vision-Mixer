@@ -32,6 +32,9 @@ target-version = "py311"
 [tool.ruff.lint]
 extend-select = ["I"]
 
+[tool.pytest.ini_options]
+markers = ["performance: opt-in local timing checks; set ATEM_RUN_PERFORMANCE=1"]
+
 [tool.coverage.run]
 branch = true
 
