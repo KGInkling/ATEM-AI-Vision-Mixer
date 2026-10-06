@@ -12,6 +12,9 @@ and crop configurations for testing perception without hardware.
 See [Feed health and motion](docs/FEED_HEALTH.md) for local black/frozen-feed
 detection, quality defects, and the four-camera performance checkpoint.
 
+See [Speech detection and pause grading](docs/AUDIO_VAD.md) for local ONNX speech
+detection, its audio input contract, and pause timing.
+
 ## Emergency main-branch access
 
 Normal changes must reach `main` through a pull request. The `main-protection` ruleset has no
