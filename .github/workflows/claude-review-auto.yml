@@ -1,0 +1,84 @@
+name: Schedule Claude Review
+
+on:
+  workflow_run:
+    workflows: [ci]
+    types: [completed]
+
+permissions: {}
+
+jobs:
+  dispatch:
+    if: ${{ github.event.workflow_run.conclusion == 'success' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      actions: write
+      pull-requests: read
+      checks: read
+      statuses: read
+    steps:
+      - name: Dispatch review after successful checks
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPOSITORY: ${{ github.repository }}
+          DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
+          CI_RUN_ID: ${{ github.event.workflow_run.id }}
+        run: |
+          set -euo pipefail
+          # Read only GitHub metadata: never checkout code or download CI artifacts.
+          [[ "$CI_RUN_ID" =~ ^[1-9][0-9]*$ ]]
+          run_json=$(gh api "repos/$REPOSITORY/actions/runs/$CI_RUN_ID")
+          if ! jq -e --arg repository "$REPOSITORY" '
+            .path == ".github/workflows/ci.yml"
+            and .event == "pull_request" and .conclusion == "success"
+            and .head_repository.full_name == $repository
+          ' <<<"$run_json" >/dev/null; then
+            echo "::notice::CI run is not eligible for automatic review."
+            exit 0
+          fi
+          head_sha=$(jq -r '.head_sha' <<<"$run_json")
+          [[ "$head_sha" =~ ^[0-9a-f]{40}$ ]]
+          pr_numbers=$(jq -r '.pull_requests[].number' <<<"$run_json")
+          if [[ -z "$pr_numbers" ]]; then
+            echo "::error::CI run has no verifiable pull request association."
+            exit 1
+          fi
+          while IFS= read -r pr_number; do
+            [[ "$pr_number" =~ ^[1-9][0-9]*$ ]]
+            pr_json=$(gh api "repos/$REPOSITORY/pulls/$pr_number")
+            if ! jq -e --arg repository "$REPOSITORY" --arg base "$DEFAULT_BRANCH" --arg sha "$head_sha" '
+              .state == "open" and .draft == true and .base.ref == $base
+              and .head.repo.full_name == $repository and .head.sha == $sha
+            ' <<<"$pr_json" >/dev/null; then
+              echo "::notice::Pull request moved or is not an eligible draft."
+              continue
+            fi
+            checks_ready=false
+            # CodeQL can finish shortly after CI. Bound that wait to five minutes.
+            for ((attempt=0; attempt<30; attempt++)); do
+              checks_json=$(gh pr checks "$pr_number" --repo "$REPOSITORY" --required --json name,bucket) || true
+              jq -e 'type == "array"' <<<"$checks_json" >/dev/null
+              if jq -e 'any(.[]; .name != "claude-review" and (.bucket == "fail" or .bucket == "cancel"))' <<<"$checks_json" >/dev/null; then
+                echo "::notice::Required checks failed; no model review will run."
+                exit 0
+              fi
+              if jq -e '
+                [.[] | select(.name != "claude-review")] as $checks
+                | ($checks | map(.name) | sort) == ["CodeQL", "build", "dependency-review", "integration", "lint", "test"]
+                  and all($checks[]; .bucket == "pass")
+              ' <<<"$checks_json" >/dev/null; then
+                checks_ready=true
+                break
+              fi
+              sleep 10
+            done
+            if [[ "$checks_ready" != "true" ]]; then
+              echo "::error::Required checks are unavailable or still pending; rerun CI to retry scheduling."
+              exit 1
+            fi
+            # The trusted workflow revalidates base/head/draft and deduplicates runs.
+            gh workflow run claude-review.yml --repo "$REPOSITORY" --ref "$DEFAULT_BRANCH" \
+              -f pr_number="$pr_number" -f head_sha="$head_sha"
+          done <<<"$pr_numbers"

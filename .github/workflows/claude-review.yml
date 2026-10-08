@@ -1,6 +1,6 @@
-name: Manual Claude Review
+name: Claude Review
 
-run-name: Manual Claude review PR #${{ inputs.pr_number }} @ ${{ inputs.head_sha }}
+run-name: "Claude review PR #${{ inputs.pr_number }} @ ${{ inputs.head_sha }}"
 
 on:
   workflow_dispatch:
@@ -35,6 +35,7 @@ jobs:
       base_sha: ${{ steps.validate.outputs.base_sha }}
       head_sha: ${{ steps.validate.outputs.head_sha }}
       pr_number: ${{ steps.validate.outputs.pr_number }}
+      should_review: ${{ steps.validate.outputs.should_review }}
 
     steps:
       - name: Validate the frozen draft pull request
@@ -104,18 +105,21 @@ jobs:
             ' \
             <<<"$reviews_json" >/dev/null
           then
-            echo "::error::A marked manual Claude review already exists for this base/head scope."
-            exit 1
+            echo "::notice::This base/head already has a marked review; skipping duplicate."
+            echo "should_review=false" >> "$GITHUB_OUTPUT"
+            exit 0
           fi
 
           {
             echo "base_sha=$base_sha"
             echo "head_sha=$EXPECTED_HEAD_SHA"
             echo "pr_number=$PR_NUMBER"
+            echo "should_review=true"
           } >> "$GITHUB_OUTPUT"
 
   mark-pending:
     needs: preflight
+    if: ${{ needs.preflight.outputs.should_review == 'true' }}
     runs-on: ubuntu-latest
     timeout-minutes: 5
     permissions:
@@ -180,6 +184,33 @@ jobs:
             exit 1
           fi
 
+          # Trusted workflow policy: never take model approval from the PR itself.
+          model_path=atem_ai_vision_mixer/perception/models/silero_vad.onnx
+          model_sha256=1a153a22f4509e292a94e67d6f9b85e8deb25b4988682b7e174c65279d8788e3
+          model_size=2327524
+          : > review-context/model-assets.jsonl
+          for revision in "$merge_base" "$HEAD_SHA"; do
+            model_mode=$(git -C pr-head ls-tree "$revision" -- "$model_path" | awk '{print $1}')
+            if [[ -z "$model_mode" ]]; then
+              continue
+            fi
+            if [[ "$model_mode" != "100644" ]]; then
+              echo "::error::Pinned model must be a regular non-executable Git blob."
+              exit 1
+            fi
+            actual_size=$(git -C pr-head cat-file -s "$revision:$model_path")
+            actual_sha256=$(git -C pr-head cat-file blob "$revision:$model_path" | shasum -a 256 | awk '{print $1}')
+            if [[ "$actual_size" != "$model_size" || "$actual_sha256" != "$model_sha256" ]]; then
+              echo "::error::Model asset does not match the trusted size and checksum."
+              exit 1
+            fi
+            jq -nc \
+              --arg path "$model_path" --arg revision "$revision" \
+              --arg sha256 "$actual_sha256" --argjson size "$actual_size" \
+              '{path: $path, revision: $revision, sha256: $sha256, size: $size, content_omitted: true}' \
+              >> review-context/model-assets.jsonl
+          done
+
           jq -n \
             --arg base_sha "$BASE_SHA" \
             --arg head_sha "$HEAD_SHA" \
@@ -192,7 +223,7 @@ jobs:
             --no-textconv \
             --unified=80 \
             "$merge_base" \
-            "$HEAD_SHA" \
+            "$HEAD_SHA" -- . ":(exclude,literal)$model_path" \
             > review-context/diff.patch
           git -C pr-head diff \
             --no-renames \
@@ -206,7 +237,7 @@ jobs:
             --numstat \
             --no-textconv \
             "$merge_base" \
-            "$HEAD_SHA" \
+            "$HEAD_SHA" -- . ":(exclude,literal)$model_path" \
             > review-context/numstat.txt
 
           if grep -Eq '^-[[:space:]]+-[[:space:]]+' review-context/numstat.txt; then
@@ -239,6 +270,9 @@ jobs:
 
           is_allowlisted_path() {
             case "$1" in
+              atem_ai_vision_mixer/perception/models/license)
+                return 0
+                ;;
               .coverage-thresholds|.dockerignore|.gitattributes|.gitignore|.gitmessage|agents.md|claude.md|codeowners|dockerfile|license|makefile|readme|readme.md|requirements*.txt|*.bash|*.cfg|*.conf|*.ini|*.json|*.lock|*.md|*.py|*.pyi|*.rst|*.sh|*.toml|*.yaml|*.yml|*.zsh)
                 return 0
                 ;;
@@ -257,6 +291,10 @@ jobs:
             > "$changed_paths_file"
 
           while IFS= read -r -d '' changed_path; do
+            # Both revisions were verified above; never pass model bytes to the LLM.
+            if [[ "$changed_path" == "$model_path" ]]; then
+              continue
+            fi
             changed_path_lower=$(printf '%s' "$changed_path" | tr '[:upper:]' '[:lower:]')
             if is_sensitive_path "$changed_path_lower"; then
               echo "::error::Sensitive changed paths are outside the model-review boundary."
@@ -278,6 +316,17 @@ jobs:
               exit 1
             fi
 
+            # Check deleted/base blobs too: attributes can force a binary text diff.
+            for revision in "$merge_base" "$HEAD_SHA"; do
+              if git -C pr-head cat-file -e "$revision:$changed_path" 2>/dev/null; then
+                git -C pr-head cat-file blob "$revision:$changed_path" > "$RUNNER_TEMP/review-blob"
+                if [[ -s "$RUNNER_TEMP/review-blob" ]] && ! grep -Iq . "$RUNNER_TEMP/review-blob"; then
+                  echo "::error::Non-text Git blob is outside the model-review boundary."
+                  exit 1
+                fi
+              fi
+            done
+
             changed_file="pr-head/$changed_path"
             if [[ -L "$changed_file" ]]; then
               echo "::error::Symlink changes are outside the model-review boundary."
@@ -293,6 +342,9 @@ jobs:
           tracked_paths_file="$RUNNER_TEMP/manual-review-tracked-paths.zlist"
           git -C pr-head ls-files -z > "$tracked_paths_file"
           while IFS= read -r -d '' tracked_path; do
+            if [[ "$tracked_path" == "$model_path" ]]; then
+              continue
+            fi
             tracked_path_lower=$(printf '%s' "$tracked_path" | tr '[:upper:]' '[:lower:]')
             if is_sensitive_path "$tracked_path_lower" || ! is_allowlisted_path "$tracked_path_lower"; then
               continue
@@ -321,8 +373,9 @@ jobs:
             --rawfile changed_files review-context/changed-files.txt \
             --rawfile numstat review-context/numstat.txt \
             --slurpfile sources review-context/sources.jsonl \
+            --slurpfile model_assets review-context/model-assets.jsonl \
             '{revisions: $revisions[0], diff: $diff, changed_files: $changed_files,
-              numstat: $numstat, sources: $sources}' >> review-context/input.txt
+              numstat: $numstat, sources: $sources, model_assets: $model_assets}' >> review-context/input.txt
 
           if grep -Eiq -- \
             '-----BEGIN ([A-Z ]+ )?PRIVATE KEY-----|sk-ant-[A-Za-z0-9_-]+|github_pat_[A-Za-z0-9_]+|gh[pousr]_[A-Za-z0-9]{20,}|A[KS]IA[0-9A-Z]{16}|xox[baprs]-[A-Za-z0-9-]+' \
