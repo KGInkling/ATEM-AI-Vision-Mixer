@@ -18,6 +18,9 @@ detection, quality defects, and the four-camera performance checkpoint.
 See [Speech detection and pause grading](docs/AUDIO_VAD.md) for local ONNX speech
 detection, its audio input contract, and pause timing.
 
+See [Local people detection](docs/PEOPLE.md) for MediaPipe model setup,
+per-camera tracking, and pose limited to the live camera and challenger.
+
 ## Emergency main-branch access
 
 Normal changes must reach `main` through a pull request. The `main-protection` ruleset has no
