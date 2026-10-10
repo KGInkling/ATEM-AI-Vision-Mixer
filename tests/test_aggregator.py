@@ -1,6 +1,10 @@
 """WorldState assembly, causal audio, and explicit pipeline history (R11)."""
 
+import ast
+import os
 from fractions import Fraction
+from pathlib import Path
+from time import perf_counter
 from types import SimpleNamespace
 
 import pytest
@@ -9,6 +13,7 @@ np = pytest.importorskip("numpy")
 pytest.importorskip("cv2")
 
 import atem_ai_vision_mixer.perception.aggregator as module
+from atem_ai_vision_mixer.capture.file_source import FileSource
 from atem_ai_vision_mixer.capture.source import AudioMetadata, CapturedFrame
 from atem_ai_vision_mixer.capture.tiles import TileRectangle
 from atem_ai_vision_mixer.perception.aggregator import PerceptionPipeline
@@ -393,3 +398,210 @@ def test_inference_failure_clears_partial_histories_and_close_releases_resources
         _tick(pipeline, _frame(0.2))
     with pytest.raises(RuntimeError, match="closed"):
         pipeline.reset()
+
+
+def _golden_tiles():
+    return {
+        camera: TileRectangle(x, y, 960, 540)
+        for camera, (x, y) in enumerate([(0, 0), (960, 0), (0, 540), (960, 540)], 1)
+    }
+
+
+def _golden_frame(index):
+    image = np.full((1080, 1920, 3), 100, dtype=np.uint8)
+    if index >= 3:
+        image[:540, :960] = 0
+    # Noise discarded by thumbnail scaling still proves these cameras are live.
+    image[0, 960, 0] = 100 + index
+    image[540, 960, 0] = 100 + index
+    audio = np.full((1, 1600), 0.25 if index < 5 else 0.0, dtype=np.float32)
+    return CapturedFrame(
+        image, audio, index / 10, AudioMetadata(16000, "flt", "mono", index / 10, 1600)
+    )
+
+
+def _golden_models(monkeypatch):
+    def detect(self, tiles, pts, **selection):
+        observations = {camera: PeopleObservation(False, None) for camera in tiles}
+        observations[2] = PeopleObservation(
+            True,
+            SimpleNamespace(origin_x=224, origin_y=27, width=192, height=270),
+            box_source="pose",
+        )
+        observations[4] = PeopleObservation(
+            True,
+            SimpleNamespace(origin_x=-10, origin_y=0, width=192, height=270),
+            box_source="pose",
+        )
+        return observations
+
+    def run(self, outputs, inputs):
+        speech = bool(np.max(np.abs(inputs["input"][:, -512:])) > 0.125)
+        return np.array([[float(speech)]], dtype=np.float32), inputs["state"]
+
+    monkeypatch.setattr(People, "detect", detect)
+    monkeypatch.setattr(Session, "run", run)
+
+
+def _golden_replay(frames):
+    with PerceptionPipeline(
+        _golden_tiles(), face_model_path="test-face", pose_model_path="test-pose"
+    ) as pipeline:
+        return [
+            pipeline.tick(
+                frame,
+                ProgramState(live_camera=2, seconds_live=frame.pts),
+                challenger_camera=4,
+            )
+            for frame in frames
+        ]
+
+
+def _assert_golden_properties(states):
+    expected = Path(__file__).parent / "golden" / "perception.jsonl"
+    assert [state.model_dump() for state in states] == [
+        WorldState.model_validate_json(line).model_dump()
+        for line in expected.read_text().splitlines()
+    ]
+    previous_pause = 0
+    for state in states:
+        assert WorldState.model_validate_json(state.model_dump_json()) == state
+        for camera in state.cameras.values():
+            assert 0.0 <= camera.framing_score <= 1.0
+            assert 0.0 <= camera.motion_score <= 1.0
+            if not camera.feed_healthy:
+                assert set(camera.defects) & {"black", "frozen"}
+        assert state.cameras[2].feed_healthy and state.cameras[4].feed_healthy
+        assert "frozen" not in state.cameras[2].defects
+        assert "frozen" not in state.cameras[4].defects
+        if state.audio.speaking:
+            assert state.audio.pause_ms == 0
+            previous_pause = 0
+        else:
+            assert state.audio.pause_ms >= previous_pause
+            previous_pause = state.audio.pause_ms
+
+
+def test_four_camera_golden_snapshots_assert_all_six_perception_properties(
+    setup, monkeypatch
+):
+    _golden_models(monkeypatch)
+    states = _golden_replay(_golden_frame(index) for index in range(20))
+    _assert_golden_properties(states)
+    replay = _golden_replay(_golden_frame(index) for index in range(20))
+    assert replay == states
+    assert any(state.audio.speaking for state in states)
+    assert any(
+        not state.audio.speaking and state.audio.pause_ms >= 400 for state in states
+    )
+    assert "black" in states[3].cameras[1].defects
+    assert "frozen" in states[2].cameras[3].defects
+    assert "headroom_tight" in states[0].cameras[4].defects
+
+
+def _write_golden_recording(path, av):
+    with av.open(str(path), "w", format="nut") as container:
+        video = container.add_stream("rawvideo", rate=10)
+        video.width, video.height, video.pix_fmt = 1920, 1080, "bgr24"
+        audio = container.add_stream("pcm_f32le", rate=16000)
+        audio.layout = "mono"
+        for index in range(20):
+            captured = _golden_frame(index)
+            frame = av.VideoFrame.from_ndarray(captured.video, format="bgr24")
+            frame.pts, frame.time_base = index, Fraction(1, 10)
+            for packet in video.encode(frame):
+                container.mux(packet)
+            sound = av.AudioFrame.from_ndarray(
+                captured.audio, format="flt", layout="mono"
+            )
+            sound.sample_rate = 16000
+            sound.pts, sound.time_base = index * 1600, Fraction(1, 16000)
+            for packet in audio.encode(sound):
+                container.mux(packet)
+        for stream in (video, audio):
+            for packet in stream.encode():
+                container.mux(packet)
+
+
+def test_recorded_multiview_pipeline_matches_committed_world_state_jsonl(
+    setup, monkeypatch, tmp_path
+):
+    av = pytest.importorskip("av")
+    _golden_models(monkeypatch)
+    monkeypatch.setattr(module, "import_module", lambda name: av)
+    recording = tmp_path / "golden.nut"
+    actual = tmp_path / "world-state.jsonl"
+    try:
+        _write_golden_recording(recording, av)
+        states = _golden_replay(FileSource(recording))
+        actual.write_text("\n".join(state.model_dump_json() for state in states) + "\n")
+        _assert_golden_properties(
+            [
+                WorldState.model_validate_json(line)
+                for line in actual.read_text().splitlines()
+            ]
+        )
+        assert _golden_replay(FileSource(recording)) == states
+    finally:
+        recording.unlink(missing_ok=True)
+        actual.unlink(missing_ok=True)
+
+
+def test_capture_and_perception_have_no_switcher_or_llm_client_imports():
+    root = Path(__file__).parents[1] / "atem_ai_vision_mixer"
+    forbidden = {"pyatem", "PyATEMMax", "anthropic", "ollama"}
+    for package in ("capture", "perception"):
+        for path in (root / package).rglob("*.py"):
+            for node in ast.walk(ast.parse(path.read_text())):
+                names = []
+                if isinstance(node, ast.Import):
+                    names = [alias.name for alias in node.names]
+                elif isinstance(node, ast.ImportFrom) and node.module:
+                    names = [node.module]
+                elif (
+                    isinstance(node, ast.Call)
+                    and isinstance(node.func, ast.Name)
+                    and node.func.id in {"import_module", "__import__"}
+                    and node.args
+                    and isinstance(node.args[0], ast.Constant)
+                    and isinstance(node.args[0].value, str)
+                ):
+                    names = [node.args[0].value]
+                assert not {name.split(".")[0] for name in names} & forbidden, path
+
+
+@pytest.mark.performance
+@pytest.mark.skipif(
+    os.environ.get("ATEM_RUN_PERFORMANCE") != "1",
+    reason="Opt in with ATEM_RUN_PERFORMANCE=1 and local MediaPipe model paths",
+)
+def test_four_camera_real_pipeline_steady_p95_under_one_hundred_ms():
+    face = os.environ.get("ATEM_FACE_MODEL_PATH")
+    pose = os.environ.get("ATEM_POSE_MODEL_PATH")
+    if not face or not pose:
+        pytest.skip(
+            "Set ATEM_FACE_MODEL_PATH and ATEM_POSE_MODEL_PATH for real-model timing"
+        )
+    pytest.importorskip("av")
+    pytest.importorskip("mediapipe")
+    pytest.importorskip("onnxruntime")
+    elapsed = []
+    cold = []
+    with PerceptionPipeline(
+        _golden_tiles(), face_model_path=face, pose_model_path=pose
+    ) as pipeline:
+        for index in range(60):
+            frame = _golden_frame(index)
+            start = perf_counter()
+            pipeline.tick(
+                frame,
+                ProgramState(live_camera=2, seconds_live=frame.pts),
+                challenger_camera=4,
+            )
+            duration = perf_counter() - start
+            (cold if index < 10 else elapsed).append(duration)
+    p95 = float(np.percentile(elapsed, 95))
+    print(
+        f"Four-camera real pipeline steady p95: {p95 * 1000:.3f} ms; cold max: {max(cold) * 1000:.3f} ms"
+    )
+    assert p95 < 0.1

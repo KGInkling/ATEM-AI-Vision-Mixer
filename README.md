@@ -27,6 +27,9 @@ features, named defects, and local per-camera movement history.
 See [Recorded perception pipeline](docs/PIPELINE.md) to turn captured video and
 audio into validated WorldState snapshots without hardware.
 
+See [Perception verification](docs/PERCEPTION_VERIFICATION.md) for the requirement
+map, recorded golden sequence, and opt-in local timing checkpoints.
+
 ## Emergency main-branch access
 
 Normal changes must reach `main` through a pull request. The `main-protection` ruleset has no
