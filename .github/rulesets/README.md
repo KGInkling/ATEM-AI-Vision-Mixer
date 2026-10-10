@@ -16,11 +16,12 @@ Use the ID to inspect the live configuration:
 gh api /repos/KGInkling/ATEM-AI-Vision-Mixer/rulesets/20595499
 ```
 
-## Activation candidate
+## Active required checks
 
-[`main-protection.json`](main-protection.json) declares the proposed required contexts below.
-It is not applied automatically. The live ruleset still requires only `lint` and `test` until
-the separately authorized activation; this temporary difference is the planned migration.
+[`main-protection.json`](main-protection.json) declares the seven required contexts below.
+The separately approved live activation is complete. Readback on October 9, 2026 confirmed
+that ruleset `20595499` requires all seven, with active enforcement, strict checks, and no
+bypass actors. Editing the JSON alone does not apply changes to GitHub.
 
 | Context | Evidence source |
 |---|---|
@@ -32,12 +33,11 @@ the separately authorized activation; this temporary difference is the planned m
 | `CodeQL` | GitHub Advanced Security's CodeQL result |
 | `claude-review` | Manual workflow's commit status and marked review on the exact PR head |
 
-These names were observed during the shadow checkpoint, but those earlier passes do not
-authorize activation. Verify them again on the activation PR's unchanged final head. The
-`Analyze (actions)` and `Analyze (python)` jobs are diagnostic evidence alongside the `CodeQL`
-result. Keep both analyses passing.
+This list matches the live ruleset and the required-check classification observed on PR #30.
+The `Analyze (actions)` and `Analyze (python)` jobs are diagnostic evidence alongside the
+required `CodeQL` result. Keep both analyses passing.
 
-### Before the live switch
+### Procedure for future protection changes
 
 1. Keep the final activation PR in draft. Run the manual reviewer on its frozen head and verify the
    marked review and commit status, including the manual workflow run URL.

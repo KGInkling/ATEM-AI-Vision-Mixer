@@ -2,6 +2,7 @@ name: ci
 
 on:
   pull_request:
+    types: [opened, synchronize, reopened, converted_to_draft]
     branches:
       - main
   push:
@@ -81,6 +82,9 @@ jobs:
             --cov=atem_ai_vision_mixer \
             --cov-report=term-missing \
             --cov-report=xml
+
+      - name: Verify review workflow boundaries
+        run: python -B -m unittest discover -s .github/tests -q
 
       - name: Enforce per-file coverage thresholds
         run: |
