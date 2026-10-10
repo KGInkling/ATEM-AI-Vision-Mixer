@@ -43,6 +43,21 @@ Return the structured result required by the workflow schema.
 - Every finding must name severity, file, line, and concrete evidence.
 - An empty findings list is required for `clean`; at least one finding is required for `findings`.
 
+## Writing
+
+- Use familiar words, active voice, and short sentences. Avoid invented compound labels and
+  unexplained jargon. Use exact code names only when needed to locate or explain the defect.
+- Keep `summary` to two sentences: the reviewed behavior and the result or inspection limits.
+  Do not repeat finding details or list every file inspected.
+- Give each finding a short title describing the observable bug. Aim for ten words or fewer.
+- In `evidence`, use three short paragraphs separated by blank lines, with these Markdown labels:
+  `**Trigger:**` for the reachable condition, `**Impact:**` for the resulting failure, and
+  `**Evidence:**` for the specific code and caller or contract that demonstrate it.
+- Aim for one sentence per paragraph and about 80 words per finding. These are writing targets;
+  retain evidence needed to establish the defect and respect the workflow's schema limits.
+- Report every supported consequential finding. Do not shorten the review by dropping findings
+  or necessary inspection limits, and do not add praise, repeated warnings, or optional refactors.
+
 The publisher—not the model—creates the GitHub review with marker
 `<!-- manual-claude-review:v1 -->`, reviewer `Claude Code`, the reviewed SHA, verdict, summary, and
 findings. Missing, malformed, stale, or unverifiable output is unavailable and must never be
