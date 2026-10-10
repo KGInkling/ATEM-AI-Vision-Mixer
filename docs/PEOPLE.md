@@ -71,6 +71,13 @@ precedence over the highest-confidence face box. Pose points with visibility or
 presence below 0.5, or nonfinite coordinates, do not contribute to that box.
 Off-frame coordinates are retained so framing can identify an edge cut.
 
+`box_source` records which detector supplied the selected box: `"face"`,
+`"pose"`, or `None` when no box exists. Pose landmarks may still be present with
+a face box if their confidence or extent is insufficient for a body box. Framing
+uses this source to keep movement history comparable. Callers constructing
+observations directly should label the box source explicitly; the default `None`
+leaves composition available but makes framing start a fresh movement history.
+
 On other cameras, presence is a face-detection proxy and the box covers the face,
 not the whole body. It can miss a person facing away. On selected cameras, pose
 can detect a person even without a visible face. Pose runs for one body; this

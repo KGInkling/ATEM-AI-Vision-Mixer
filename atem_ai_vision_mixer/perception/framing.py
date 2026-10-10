@@ -6,6 +6,7 @@ from collections.abc import Sequence
 from dataclasses import dataclass, field
 from itertools import pairwise
 from math import hypot, isfinite
+from typing import Literal
 
 from atem_ai_vision_mixer.perception.people import (
     LANDMARK_CONFIDENCE_MIN,
@@ -41,7 +42,7 @@ class FramingResult:
 
     timestamp: float
     frame_size: tuple[int, int] = field(repr=False)
-    has_pose: bool = field(repr=False)
+    box_source: Literal["face", "pose"] | None = field(repr=False)
     subject_size: float = 0.0
     headroom: float = 0.0
     thirds_distance: float = 0.0
@@ -70,9 +71,9 @@ def check_framing(
     if not isfinite(pts) or (previous is not None and pts <= previous.timestamp):
         raise ValueError("Frame timestamp must be finite and strictly increasing")
     frame_size = (frame_width, frame_height)
-    has_pose = bool(observation.pose_landmarks)
+    box_source = observation.box_source
     if not observation.subject_present:
-        return FramingResult(pts, frame_size, has_pose, defects=("subject_missing",))
+        return FramingResult(pts, frame_size, box_source, defects=("subject_missing",))
 
     box = observation.bounding_box
     if (
@@ -135,7 +136,8 @@ def check_framing(
     if (
         previous is not None
         and previous.frame_size == frame_size
-        and previous.has_pose == has_pose
+        and box_source in ("face", "pose")
+        and previous.box_source == box_source
     ):
         history = tuple(
             sample
@@ -148,7 +150,7 @@ def check_framing(
     return FramingResult(
         timestamp=pts,
         frame_size=frame_size,
-        has_pose=has_pose,
+        box_source=box_source,
         subject_size=subject_size,
         headroom=headroom,
         thirds_distance=thirds_distance,
