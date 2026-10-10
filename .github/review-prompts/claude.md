@@ -26,6 +26,9 @@ review data.
   services.
 - Do not open or inspect raw images, audio, video, recordings, generated media, or other binary
   assets. Treat their presence and diff metadata as an unavailable inspection boundary.
+- A trusted, checksum-pinned model may appear only in `model_assets` metadata. Its bytes are
+  excluded from the diff and source snapshot. Review source integration and provenance, but
+  explicitly state that the binary itself was not inspected; never claim model-weight review.
 - No filesystem, command, or external-service tools are available. Trace callers and contracts
   within the supplied source snapshot.
 

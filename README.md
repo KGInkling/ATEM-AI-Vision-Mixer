@@ -3,6 +3,9 @@ An AI video switcher that picks the best shots for video feed
 
 ## Development
 
+See [Automatic Claude review](docs/CLAUDE_REVIEW.md) for draft-PR scheduling,
+model-asset checks, and recovery from a failed review.
+
 See [Docker development environment](docs/DOCKER.md) for reproducible builds, tests, and the
 boundary between portable logic and host-only video hardware.
 
