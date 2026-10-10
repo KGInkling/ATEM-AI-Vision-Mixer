@@ -7,6 +7,7 @@ import pytest
 
 np = pytest.importorskip("numpy")
 
+from atem_ai_vision_mixer.perception.framing import check_framing
 from atem_ai_vision_mixer.perception.people import PeopleDetector
 
 
@@ -102,6 +103,7 @@ def test_face_runs_on_all_tiles_with_independent_video_histories(backend):
     assert list(first) == [1, 2, 3, 4]
     assert all(not observation.subject_present for observation in first.values())
     assert all(observation.bounding_box is None for observation in first.values())
+    assert all(observation.box_source is None for observation in first.values())
     assert len(backend.face.instances) == 4
     for camera, task in enumerate(backend.face.instances, start=1):
         assert [timestamp for _, timestamp in task.calls] == [0, 100]
@@ -161,6 +163,7 @@ def test_highest_confidence_face_provides_box_without_face_keypoints(backend):
 
     assert observation.subject_present
     assert observation.bounding_box == boxes[1]
+    assert observation.box_source == "face"
     assert observation.pose_landmarks == ()
     assert "bounding_box" not in repr(observation)
 
@@ -173,6 +176,7 @@ def test_pose_detects_person_without_face_and_preserves_off_frame_geometry(backe
 
     assert observation.subject_present
     assert observation.bounding_box == Box(-4, 2, 36, 20)
+    assert observation.box_source == "pose"
     assert observation.pose_landmarks == tuple(landmarks)
     assert "pose_landmarks" not in repr(observation)
 
@@ -194,9 +198,11 @@ def test_pose_box_ignores_unreliable_points_and_falls_back_to_face(backend):
     with _detector(backend) as detector:
         observation = detector.detect(_tiles(1), 0.0, live_camera=1)[1]
         assert observation.bounding_box == Box(8, 4, 20, 12)
+        assert observation.box_source == "pose"
         backend.pose.result.pose_landmarks = [[_landmark(0.2, 0.2)]]
         observation = detector.detect(_tiles(1), 0.1, live_camera=1)[1]
         assert observation.bounding_box == face_box
+        assert observation.box_source == "face"
 
 
 def test_pose_without_reliable_extent_does_not_invent_a_subject_box(backend):
@@ -206,6 +212,37 @@ def test_pose_without_reliable_extent_does_not_invent_a_subject_box(backend):
 
     assert not observation.subject_present
     assert observation.bounding_box is None
+    assert observation.box_source is None
+
+
+def test_confidence_changes_switch_box_source_without_inventing_subject_movement(
+    backend,
+):
+    face_box = Box(1, 2, 3, 4)
+    backend.face.result.detections = [
+        SimpleNamespace(bounding_box=face_box, categories=[SimpleNamespace(score=0.9)])
+    ]
+    landmarks = [_landmark(0.2, 0.2), _landmark(0.7, 0.8)]
+    backend.pose.result.pose_landmarks = [landmarks]
+    previous = None
+    lengths = []
+    with _detector(backend) as detector:
+        for index, confidence in enumerate([0.1, 1.0, 1.0, 0.1]):
+            for point in landmarks:
+                point.visibility = confidence
+            observation = detector.detect(_tiles(1), index / 10, live_camera=1)[1]
+            assert observation.pose_landmarks
+            previous = check_framing(
+                observation,
+                frame_width=40,
+                frame_height=20,
+                pts=index / 10,
+                previous=previous,
+            )
+            assert previous.wander_ratio == 0.0
+            lengths.append(len(previous.history))
+
+    assert lengths == [1, 1, 2, 1]
 
 
 def test_invalid_input_does_not_advance_trackers(backend):

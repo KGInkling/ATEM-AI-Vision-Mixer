@@ -75,10 +75,15 @@ dropped. No movement, one sample, or no samples produces ratio zero; a straight
 path produces one, and returning to the starting point produces zero.
 
 Subject loss, a recording gap beyond the window, changed frame dimensions, or a
-change in pose-landmark availability restarts history. This prevents a switch
-between face and body box centers from inventing movement. Keep histories local;
-they are omitted from the result's representation but remain available in the
-object. Do not send history, boxes, landmarks, or raw frames to an LLM.
+change in `PeopleObservation.box_source` restarts history. The source identifies
+the detector that actually supplied the box, even when pose landmarks remain
+present during face fallback. This prevents a switch between face and body box
+centers from inventing movement. Landmark availability alone does not determine
+the source. An unknown source starts a fresh history on every call; callers
+constructing observations directly must label comparable boxes to track movement.
+Keep histories local; they are omitted from the result's representation but remain
+available in the object. Do not send history, boxes, landmarks, or raw frames to
+an LLM.
 
 Face-only results still use a face box, not body height. Their framing is a
 proxy; joint defects cannot be inferred without pose. The detector does not
@@ -93,8 +98,13 @@ task group; existing WorldState, directors, controllers, and CI are unchanged.
 Tests use synthetic boxes and landmarks for composition, cuts, movement, replay,
 and camera-state compatibility. Like the other perception tests, they skip when
 the optional NumPy dependency is absent; with the perception extra installed,
-all 48 cases ran. The complete suite passed 273 tests with one optional timing
-test skipped. Framing coverage was 100%, above the spec's 90% checkpoint.
+all 50 framing cases ran. The complete suite passed 276 tests with one optional
+timing test skipped. Framing coverage was 100%, above the spec's 90% checkpoint.
+
+The detector-to-framing regression changes only pose confidence, retaining
+landmarks throughout face-to-body and body-to-face transitions. It verifies zero
+invented movement, history restart on source changes, and continuation while the
+actual source stays the same.
 
 A local run used real MediaPipe 1.0.0 geometry containers populated with synthetic
 data and processed four cameras over 1,000 ticks at recorded 0.1-second intervals.

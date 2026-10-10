@@ -20,8 +20,10 @@ class Box:
     height: float
 
 
-def _person(x=160, y=50, width=80, height=500, landmarks=()):
-    return PeopleObservation(True, Box(x, y, width, height), tuple(landmarks))
+def _person(x=160, y=50, width=80, height=500, landmarks=(), source="face"):
+    return PeopleObservation(
+        True, Box(x, y, width, height), tuple(landmarks), box_source=source
+    )
 
 
 def _check(person=None, *, pts=0.0, previous=None, width=600, height=1000):
@@ -183,7 +185,7 @@ def test_movement_history_is_a_pure_snapshot_with_a_two_second_window():
     assert fourth == _check(_person(x=200), pts=3.01, previous=third)
 
 
-def test_subject_loss_gap_resolution_and_pose_change_restart_motion_history():
+def test_subject_loss_gap_resolution_and_box_source_change_restart_motion_history():
     first = _check(pts=0.0)
     missing = _check(PeopleObservation(False, None), pts=0.1, previous=first)
     assert missing.framing_score == 0.0
@@ -197,10 +199,31 @@ def test_subject_loss_gap_resolution_and_pose_change_restart_motion_history():
         result = _check(pts=pts, previous=previous, **kwargs)
         assert result.wander_ratio == 0.0
         assert len(result.history) == 1
-    pose = _check(_person(landmarks=_pose(25, y=0.5)), pts=0.1, previous=first)
+    pose = _check(
+        _person(landmarks=_pose(25, y=0.5), source="pose"), pts=0.1, previous=first
+    )
     assert pose.wander_ratio == 0.0
     face = _check(pts=0.2, previous=pose)
     assert face.wander_ratio == 0.0
+
+
+def test_landmark_availability_does_not_reset_history_when_face_box_source_is_unchanged():
+    first = _check()
+    second = _check(_person(landmarks=_pose(25, y=0.5)), pts=0.1, previous=first)
+
+    assert second.wander_ratio == 0.0
+    assert len(second.history) == 2
+
+
+def test_unknown_box_source_does_not_join_incomparable_motion_histories():
+    first = _check(PeopleObservation(True, Box(160, 50, 80, 500)))
+    second = _check(
+        PeopleObservation(True, Box(300, 50, 80, 500)), pts=0.1, previous=first
+    )
+
+    assert second.wander_ratio == 0.0
+    assert len(second.history) == 1
+    assert 0.0 <= second.framing_score <= 1.0
 
 
 def test_each_camera_keeps_its_own_movement_history():

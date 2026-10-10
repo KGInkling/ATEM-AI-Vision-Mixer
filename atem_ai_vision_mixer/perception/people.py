@@ -8,7 +8,7 @@ from dataclasses import dataclass, field
 from importlib import import_module
 from math import ceil, floor, isfinite
 from pathlib import Path
-from typing import TYPE_CHECKING, Self
+from typing import TYPE_CHECKING, Literal, Self
 
 import numpy as np
 
@@ -29,6 +29,7 @@ class PeopleObservation:
     subject_present: bool
     bounding_box: BoundingBox | None = field(repr=False)
     pose_landmarks: tuple[NormalizedLandmark, ...] = field(default=(), repr=False)
+    box_source: Literal["face", "pose"] | None = field(default=None, repr=False)
 
 
 class PeopleDetector:
@@ -95,11 +96,13 @@ class PeopleDetector:
                     self._faces[camera] = self._create_task(pose=False)
                 faces = self._faces[camera].detect_for_video(image, timestamp_ms)
                 box = None
+                box_source = None
                 if faces.detections:
                     best = max(
                         faces.detections, key=lambda face: face.categories[0].score
                     )
                     box = best.bounding_box
+                    box_source = "face"
                 landmarks = ()
                 if camera in selected:
                     if camera not in self._poses:
@@ -110,8 +113,9 @@ class PeopleDetector:
                         body_box = self._body_box(landmarks, tile.shape)
                         if body_box is not None:
                             box = body_box
+                            box_source = "pose"
                 observations[camera] = PeopleObservation(
-                    box is not None, box, landmarks
+                    box is not None, box, landmarks, box_source=box_source
                 )
         except Exception:
             # Some tasks may already have consumed this timestamp. Discard all
