@@ -270,7 +270,7 @@ jobs:
 
           is_allowlisted_path() {
             case "$1" in
-              atem_ai_vision_mixer/perception/models/license)
+              tests/golden/perception.jsonl|atem_ai_vision_mixer/perception/models/license)
                 return 0
                 ;;
               .coverage-thresholds|.dockerignore|.gitattributes|.gitignore|.gitmessage|agents.md|claude.md|codeowners|dockerfile|license|makefile|readme|readme.md|requirements*.txt|*.bash|*.cfg|*.conf|*.ini|*.json|*.lock|*.md|*.py|*.pyi|*.rst|*.sh|*.toml|*.yaml|*.yml|*.zsh)
