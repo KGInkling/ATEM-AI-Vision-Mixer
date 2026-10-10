@@ -205,6 +205,7 @@ class DispatchTests(unittest.TestCase):
                 "CodeQL",
             ]
         ]
+        self.check_responses = None
         mock = self.root / "gh"
         mock.write_text(
             "#!/usr/bin/env python3\n"
@@ -217,6 +218,17 @@ class DispatchTests(unittest.TestCase):
                 request = next(a for a in args if a.startswith('repos/'))
                 print(json.dumps([data.get('reviews', [])] if request.endswith('/reviews') else data['run' if '/actions/runs/' in request else 'pr']))
             elif args[:2] == ['pr', 'checks']:
+                responses = data.get('check_responses')
+                if responses:
+                    counter = Path(os.environ['MOCK_DATA']).with_suffix('.calls')
+                    index = int(counter.read_text()) if counter.exists() else 0
+                    counter.write_text(str(index + 1))
+                    response = responses[min(index, len(responses) - 1)]
+                    if response == 'empty':
+                        raise SystemExit(1)
+                    if response == 'invalid':
+                        print('temporary API error')
+                        raise SystemExit(1)
                 print(json.dumps(data['checks']))
             elif args[:2] == ['workflow', 'run']:
                 Path(os.environ['MOCK_DISPATCH']).write_text(json.dumps(args))
@@ -232,7 +244,14 @@ class DispatchTests(unittest.TestCase):
     def dispatch(self):
         data = self.root / "data.json"
         data.write_text(
-            json.dumps({"run": self.run, "pr": self.pr, "checks": self.checks})
+            json.dumps(
+                {
+                    "run": self.run,
+                    "pr": self.pr,
+                    "checks": self.checks,
+                    "check_responses": self.check_responses,
+                }
+            )
         )
         result = subprocess.run(
             [
@@ -293,6 +312,20 @@ class DispatchTests(unittest.TestCase):
         self.checks.append({"name": "CodeQL", "bucket": "fail"})
         _, output = self.dispatch()
         self.assertFalse(output.exists())
+
+    def test_transient_empty_and_invalid_check_responses_recover(self):
+        self.check_responses = ["empty", "invalid", "valid"]
+        result, output = self.dispatch()
+        self.assertEqual(result.returncode, 0, result.stderr.decode())
+        self.assertTrue(output.exists())
+        self.assertEqual((self.root / "data.calls").read_text(), "3")
+
+    def test_permanent_invalid_check_response_exhausts_bounded_retry(self):
+        self.check_responses = ["invalid"]
+        result, output = self.dispatch()
+        self.assertNotEqual(result.returncode, 0)
+        self.assertFalse(output.exists())
+        self.assertEqual((self.root / "data.calls").read_text(), "30")
 
     def preflight(self, reviews):
         data = self.root / "data.json"

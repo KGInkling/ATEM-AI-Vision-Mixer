@@ -59,7 +59,11 @@ jobs:
             # CodeQL can finish shortly after CI. Bound that wait to five minutes.
             for ((attempt=0; attempt<30; attempt++)); do
               checks_json=$(gh pr checks "$pr_number" --repo "$REPOSITORY" --required --json name,bucket) || true
-              jq -e 'type == "array"' <<<"$checks_json" >/dev/null
+              if ! jq -e -s 'length == 1 and (.[0] | type == "array")' <<<"$checks_json" >/dev/null 2>&1; then
+                echo "::notice::Check API response unavailable; retrying within the existing deadline."
+                sleep 10
+                continue
+              fi
               if jq -e 'any(.[]; .name != "claude-review" and (.bucket == "fail" or .bucket == "cancel"))' <<<"$checks_json" >/dev/null; then
                 echo "::notice::Required checks failed; no model review will run."
                 exit 0
