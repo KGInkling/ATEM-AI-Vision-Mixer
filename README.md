@@ -30,6 +30,9 @@ audio into validated WorldState snapshots without hardware.
 See [Perception verification](docs/PERCEPTION_VERIFICATION.md) for the requirement
 map, recorded golden sequence, and opt-in local timing checkpoints.
 
+See [Advisory shot policy](docs/SHOT_POLICY.md) for the validated guidance contract
+and conservative startup default used by the forthcoming LLM directors.
+
 ## Emergency main-branch access
 
 Normal changes must reach `main` through a pull request. The `main-protection` ruleset has no
