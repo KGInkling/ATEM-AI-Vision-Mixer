@@ -4,11 +4,13 @@ from __future__ import annotations
 
 import time
 from collections.abc import Iterator
+from dataclasses import replace
 from importlib import import_module
+from math import isclose
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
-from atem_ai_vision_mixer.capture.source import CapturedFrame
+from atem_ai_vision_mixer.capture.source import AudioMetadata, CapturedFrame
 
 if TYPE_CHECKING:
     import numpy as np
@@ -31,7 +33,7 @@ class FileSource:
                 selected_streams = (video_stream, audio_stream)
 
             pending_video: tuple[np.ndarray, float] | None = None
-            pending_audio: list[tuple[float, np.ndarray]] = []
+            pending_audio: list[tuple[AudioMetadata, np.ndarray]] = []
             first_video_pts = 0.0
             playback_started_at = 0.0
 
@@ -40,12 +42,19 @@ class FileSource:
                     frame_pts = _timestamp_seconds(frame)
 
                     if packet.stream.type == "audio":
-                        pending_audio.append((frame_pts, frame.to_ndarray()))
+                        metadata = AudioMetadata(
+                            sample_rate=frame.sample_rate,
+                            sample_format=frame.format.name,
+                            layout=frame.layout.name,
+                            pts=frame_pts,
+                            samples=frame.samples,
+                        )
+                        pending_audio.append((metadata, frame.to_ndarray()))
                         continue
 
                     video = frame.to_ndarray(format="bgr24")
                     if pending_video is not None:
-                        audio, pending_audio = _take_audio_before(
+                        audio, metadata, pending_audio = _take_audio_before(
                             pending_audio,
                             frame_pts,
                         )
@@ -55,6 +64,7 @@ class FileSource:
                             video=previous_video,
                             audio=audio,
                             pts=previous_pts,
+                            audio_metadata=metadata,
                         )
                     else:
                         first_video_pts = frame_pts
@@ -66,11 +76,16 @@ class FileSource:
                 return
 
             video, video_pts = pending_video
-            remaining_audio = _combine_audio(
-                [chunk for _, chunk in sorted(pending_audio, key=lambda item: item[0])]
+            remaining_audio, metadata = _combine_audio(
+                sorted(pending_audio, key=lambda item: item[0].pts)
             )
             self._pace(video_pts, first_video_pts, playback_started_at)
-            yield CapturedFrame(video=video, audio=remaining_audio, pts=video_pts)
+            yield CapturedFrame(
+                video=video,
+                audio=remaining_audio,
+                pts=video_pts,
+                audio_metadata=metadata,
+            )
 
     def _pace(
         self,
@@ -119,28 +134,53 @@ def _timestamp_seconds(frame: Any) -> float:
 
 
 def _take_audio_before(
-    pending_audio: list[tuple[float, np.ndarray]],
+    pending_audio: list[tuple[AudioMetadata, np.ndarray]],
     end_pts: float,
-) -> tuple[np.ndarray | None, list[tuple[float, np.ndarray]]]:
-    ready: list[tuple[float, np.ndarray]] = []
-    future: list[tuple[float, np.ndarray]] = []
+) -> tuple[
+    np.ndarray | None, AudioMetadata | None, list[tuple[AudioMetadata, np.ndarray]]
+]:
+    ready: list[tuple[AudioMetadata, np.ndarray]] = []
+    future: list[tuple[AudioMetadata, np.ndarray]] = []
 
-    for audio_pts, chunk in pending_audio:
-        if audio_pts < end_pts:
-            ready.append((audio_pts, chunk))
+    for metadata, chunk in pending_audio:
+        if metadata.pts < end_pts:
+            ready.append((metadata, chunk))
         else:
-            future.append((audio_pts, chunk))
+            future.append((metadata, chunk))
 
-    ready.sort(key=lambda item: item[0])
-    audio = _combine_audio([chunk for _, chunk in ready])
-    return audio, future
+    ready.sort(key=lambda item: item[0].pts)
+    audio, metadata = _combine_audio(ready)
+    return audio, metadata, future
 
 
-def _combine_audio(chunks: list[np.ndarray]) -> np.ndarray | None:
+def _combine_audio(
+    chunks: list[tuple[AudioMetadata, np.ndarray]],
+) -> tuple[np.ndarray | None, AudioMetadata | None]:
     if not chunks:
-        return None
+        return None, None
     if len(chunks) == 1:
-        return chunks[0]
+        metadata, samples = chunks[0]
+        return samples, metadata
+
+    metadata = chunks[0][0]
+    total_samples = 0
+    for current, _ in chunks:
+        if (current.sample_rate, current.sample_format, current.layout) != (
+            metadata.sample_rate,
+            metadata.sample_format,
+            metadata.layout,
+        ) or not isclose(
+            current.pts,
+            metadata.pts + total_samples / metadata.sample_rate,
+            rel_tol=0.0,
+            abs_tol=0.5 / metadata.sample_rate,
+        ):
+            raise ValueError(
+                "Combined audio must have one format and a continuous sample timeline"
+            )
+        total_samples += current.samples
 
     numpy = import_module("numpy")
-    return numpy.concatenate(chunks, axis=-1)
+    return numpy.concatenate([samples for _, samples in chunks], axis=-1), replace(
+        metadata, samples=total_samples
+    )

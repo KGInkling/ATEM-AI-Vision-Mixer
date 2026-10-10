@@ -22,10 +22,10 @@ if not audio_state.speaking:
   256 samples respectively. Other rates, lengths, channel shapes, dtypes, NaNs,
   infinities, and values outside [-1, 1] are rejected before inference.
 - The caller must downmix, normalize, resample when needed, and buffer complete
-  blocks. Never infer sample rate from an array's length. The current `FileSource`
-  returns codec-native arrays without sample-rate metadata; it cannot be passed
-  directly to this API. The later capture-to-aggregator integration must resolve
-  that metadata boundary explicitly.
+  blocks. Never infer sample rate from an array's length. `FileSource` preserves
+  codec-native arrays and now supplies `AudioMetadata`; the
+  [recorded perception pipeline](PIPELINE.md) uses it to downmix/resample and
+  buffer only causal, complete blocks before calling this API.
 - Use one `VadState` per continuous program-audio stream. Recurrent state and the
   model's preceding-sample context are retained between calls. `reset()` clears
   history after a seek, missing/discontinuous audio, or a new recording, while
@@ -82,4 +82,5 @@ Tests cover transition hysteresis, sample-based timing, pause boundaries, invali
 input, model-state/context reuse, reset, stream isolation, checksum verification,
 and real offline inference at both rates. Real-inference tests require ONNX Runtime;
 the state and adapter tests still run in the core-plus-OpenCV coverage environment.
-The scenario CLI and full perception aggregator are not wired to this module yet.
+The recorded perception aggregator uses this module; the scenario CLI remains a
+scripted simulation.
