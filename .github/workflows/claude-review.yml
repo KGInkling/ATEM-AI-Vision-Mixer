@@ -425,6 +425,7 @@ jobs:
         with:
           claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
           github_token: ${{ github.token }}
+          allowed_bots: "github-actions[bot]"
           classify_inline_comments: false
           display_report: false
           include_fix_links: false
