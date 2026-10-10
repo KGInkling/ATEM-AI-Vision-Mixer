@@ -2,6 +2,7 @@
 
 from fractions import Fraction
 from pathlib import Path
+from types import SimpleNamespace
 from typing import Self
 from unittest.mock import Mock
 
@@ -27,6 +28,10 @@ class _FakeFrame:
         self.pts = pts
         self.time_base = time_base
         self.ndarray_options: list[dict[str, str]] = []
+        self.sample_rate = 8000
+        self.samples = 4000
+        self.format = SimpleNamespace(name="s16")
+        self.layout = SimpleNamespace(name="mono")
 
     def to_ndarray(self, **options: str) -> object:
         self.ndarray_options.append(options)
@@ -312,6 +317,8 @@ def test_file_source_reads_a_real_recorded_file(tmp_path: Path) -> None:
     numpy = pytest.importorskip("numpy")
     recording = tmp_path / "recording.nut"
     _write_recording(recording, av, numpy)
+    with av.open(str(recording)) as container:
+        decoded_layout = next(container.decode(audio=0)).layout.name
 
     frames = list(FileSource(recording))
 
@@ -323,6 +330,36 @@ def test_file_source_reads_a_real_recorded_file(tmp_path: Path) -> None:
     assert numpy.all(frames[1].video == 50)
     assert numpy.all(frames[0].audio == 0)
     assert numpy.all(frames[1].audio == 100)
+    assert [frame.audio_metadata.pts for frame in frames] == [0.0, 0.5]
+    assert all(frame.audio_metadata.sample_rate == 8000 for frame in frames)
+    assert all(frame.audio_metadata.sample_format == "s16" for frame in frames)
+    assert all(frame.audio_metadata.layout == decoded_layout for frame in frames)
+    assert all(frame.audio_metadata.samples == 4000 for frame in frames)
+
+
+def test_file_source_rejects_audio_gaps_instead_of_concatenating_unrelated_times(
+    monkeypatch,
+):
+    video_stream = _FakeStream("video")
+    audio_stream = _FakeStream("audio")
+    container = _FakeContainer(
+        [video_stream],
+        [audio_stream],
+        [
+            _FakePacket(video_stream, [_FakeFrame("video", pts=0)]),
+            _FakePacket(audio_stream, [_FakeFrame("first", pts=0)]),
+            _FakePacket(audio_stream, [_FakeFrame("after-gap", pts=10)]),
+        ],
+    )
+    monkeypatch.setattr(
+        file_source_module,
+        "import_module",
+        _dependency_loader(_FakeAvModule(container), _FakeNumpyModule()),
+    )
+
+    with pytest.raises(ValueError, match="continuous"):
+        list(FileSource("audio-gap.nut"))
+    assert container.closed
 
 
 def _write_recording(path: Path, av: object, numpy: object) -> None:

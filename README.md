@@ -24,6 +24,9 @@ per-camera tracking, and pose limited to the live camera and challenger.
 See [Framing quality and movement](docs/FRAMING.md) for normalized composition
 features, named defects, and local per-camera movement history.
 
+See [Recorded perception pipeline](docs/PIPELINE.md) to turn captured video and
+audio into validated WorldState snapshots without hardware.
+
 ## Emergency main-branch access
 
 Normal changes must reach `main` through a pull request. The `main-protection` ruleset has no

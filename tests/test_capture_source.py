@@ -2,7 +2,13 @@
 
 from collections.abc import Iterator
 
-from atem_ai_vision_mixer.capture.source import CapturedFrame, FrameSource
+import pytest
+
+from atem_ai_vision_mixer.capture.source import (
+    AudioMetadata,
+    CapturedFrame,
+    FrameSource,
+)
 
 
 class ExampleSource:
@@ -37,6 +43,7 @@ def test_captured_frame_accepts_video_without_an_audio_chunk() -> None:
     frame = CapturedFrame(video=object(), audio=None, pts=3.25)
 
     assert frame.audio is None
+    assert frame.audio_metadata is None
 
 
 def test_frame_source_accepts_any_matching_iterable() -> None:
@@ -47,3 +54,36 @@ def test_frame_source_accepts_any_matching_iterable() -> None:
     ]
 
     assert _read_all(ExampleSource(frames)) == frames
+
+
+def test_audio_metadata_preserves_native_payload_and_describes_its_interval():
+    audio = object()
+    metadata = AudioMetadata(44100, "s16", "stereo", 12.5, 4410)
+    frame = CapturedFrame(object(), audio, 12.5, metadata)
+
+    assert frame.audio is audio
+    assert frame.audio_metadata is metadata
+    assert metadata.end_pts == pytest.approx(12.6)
+
+
+@pytest.mark.parametrize(
+    "changes",
+    [
+        {"sample_rate": 0},
+        {"samples": 0},
+        {"pts": float("nan")},
+        {"sample_format": ""},
+        {"layout": ""},
+    ],
+)
+def test_audio_metadata_rejects_unusable_sample_intervals(changes):
+    fields = {
+        "sample_rate": 16000,
+        "sample_format": "fltp",
+        "layout": "mono",
+        "pts": 0.0,
+        "samples": 512,
+    }
+    fields.update(changes)
+    with pytest.raises(ValueError, match="Audio metadata"):
+        AudioMetadata(**fields)
