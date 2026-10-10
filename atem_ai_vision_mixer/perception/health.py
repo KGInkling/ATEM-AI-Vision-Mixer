@@ -51,16 +51,19 @@ def check_health(
     ):
         raise ValueError("Health requires a nonempty uint8 BGR tile")
 
-    small = cv2.resize(
-        tile, (THUMBNAIL_WIDTH, THUMBNAIL_HEIGHT), interpolation=cv2.INTER_AREA
-    )
-    thumbnail = cv2.cvtColor(small, cv2.COLOR_BGR2GRAY)
-    thumbnail.setflags(write=False)
-
     # Crop views are strided. Hash logical pixels, with dimensions to reset on resize.
     digest = sha256(str(tile.shape).encode("ascii"))
     digest.update(np.ascontiguousarray(tile))
     frame_hash = digest.digest()
+    if previous is not None and frame_hash == previous.frame_hash:
+        # Identical bytes and dimensions produce the same read-only thumbnail.
+        thumbnail = previous.thumbnail
+    else:
+        small = cv2.resize(
+            tile, (THUMBNAIL_WIDTH, THUMBNAIL_HEIGHT), interpolation=cv2.INTER_AREA
+        )
+        thumbnail = cv2.cvtColor(small, cv2.COLOR_BGR2GRAY)
+        thumbnail.setflags(write=False)
     identical_frames = 1
     if (
         previous is not None

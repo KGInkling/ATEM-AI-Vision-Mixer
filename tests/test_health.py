@@ -120,6 +120,8 @@ def test_strided_multiview_crop_and_contiguous_copy_have_same_identity():
     third = check_health(tile, second)
 
     assert first.frame_hash == second.frame_hash
+    assert np.array_equal(first.thumbnail, second.thumbnail)
+    assert not second.thumbnail.flags.writeable
     assert not third.feed_healthy
 
 
