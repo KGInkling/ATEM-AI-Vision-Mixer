@@ -19,6 +19,9 @@ validation, model invocation, and publication. Its concurrency group serializes
 requests for the same PR. An existing marked review for the same base/head skips
 another model call without changing its status or verdict.
 
+The Claude action explicitly allows `github-actions[bot]`, the dispatcher identity.
+Other bot actors retain the action's default rejection policy.
+
 ## Model assets
 
 The only binary exception is
