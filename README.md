@@ -21,6 +21,9 @@ detection, its audio input contract, and pause timing.
 See [Local people detection](docs/PEOPLE.md) for MediaPipe model setup,
 per-camera tracking, and pose limited to the live camera and challenger.
 
+See [Framing quality and movement](docs/FRAMING.md) for normalized composition
+features, named defects, and local per-camera movement history.
+
 ## Emergency main-branch access
 
 Normal changes must reach `main` through a pull request. The `main-protection` ruleset has no
