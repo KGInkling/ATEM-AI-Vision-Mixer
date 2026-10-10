@@ -1,110 +1,64 @@
-## Workflow identity
+## Summary
 
-<!-- Bind the change and every reported result to one reviewable revision. -->
+<!-- In 2–3 sentences, explain the problem and resulting behavior. -->
+
+## Validation
+
+<!-- List exact commands or scenarios and their results. Explain anything not applicable. -->
+
+- Checks and results:
+- Runtime verification (environment and evidence):
+- Unavailable evidence and its impact:
+
+## Risk and recovery
+
+<!-- Keep routine changes brief; include migration or recovery steps when needed. -->
+
+- Backward compatibility:
+- Rollout and post-change verification (include any separate activation):
+- Rollback:
+
+## Review details
+
+<details>
+<summary>Scope, coverage, and review evidence</summary>
+
+### Revision
 
 - Workflow ID:
-- Review cycle (`1`, `2`, or `3`; leave pending before Review starts):
-- Review profile (`core` or `full`):
 - Risk tier (`green`, `yellow`, or `red`):
+- Review cycle (`1`, `2`, or `3`; pending before Review starts):
+- Review profile (`core` or `full`):
 - Exact head SHA:
-- Base branch:
-- Base SHA:
+- Base branch and SHA:
 - Reviewer-ready commit range:
 - Scope fingerprint:
 - Affected contracts:
 
-- [ ] The exact head SHA above matches the current pull request head.
-
-## What changed and why
-
-### What changed
-
-<!-- Summarize the behavior, configuration, or documentation changed by this pull request. -->
-
-### Why
-
-<!-- Explain the problem this solves and why this change is needed now. -->
-
-## Exact scope and exclusions
-
-<!-- List the committed paths in scope and the user-owned, deferred, or unrelated paths excluded. -->
+### Scope
 
 - Changed paths:
-- Explicit exclusions:
+- Explicit exclusions (including unrelated or uncommitted work):
 
-- [ ] The pull request contains one coherent committed task scope.
-- [ ] Uncommitted and unrelated user work is excluded.
+### Reviewer walkthrough
 
-## How it was tested
+<!-- Give an ordered path through the relevant files and proof. -->
 
-<!-- List the exact commands, scenarios, or manual checks that were run. -->
-
-- [ ] Tests were added or updated for changed behavior.
-- [ ] All relevant local and CI checks pass.
-- [ ] Testing is not applicable, with an explanation below.
-
-Testing details:
-
-## Coverage
-
-<!-- Record the reported values when executable code changes. -->
-
-- Total coverage:
-- Changed-line coverage:
-- Safety-controller coverage, if applicable:
-
-Select every statement that applies:
-
-- [ ] The required coverage gates pass.
-- [ ] Coverage is not applicable because no executable code changed.
-- [ ] A coverage exception is necessary and is explained below.
-
-Coverage details or exception:
-
-## Backward compatibility
-
-Select one:
-
-- [ ] This change is backward compatible.
-- [ ] This change is not backward compatible; migration steps and affected users are described below.
-
-Compatibility details:
-
-## Rollback plan
-
-<!-- Describe how to restore the last known-good state. Include configuration or data recovery steps when needed. -->
-
-- [ ] The rollback steps below are concrete and have been checked.
-- [ ] No rollback action is needed, with an explanation below.
-
-Rollback steps or explanation:
-
-## Runtime verification
-
-<!-- Provide evidence from actually running the change, not only from reading the diff. -->
-
-- Environment:
-- Evidence, logs, or screenshots:
-
-Select one:
-
-- [ ] The changed behavior was verified at runtime.
-- [ ] Runtime verification is currently blocked or not applicable, with an explanation below.
-
-Runtime verification details:
-
-## Reviewer walkthrough
-
-<!-- Give reviewers a short, ordered path through owners, contracts, failure behavior, and proof. -->
-
-1. Canonical owner and intended behavior:
+1. Owner and intended behavior:
 2. Trust, state, or compatibility boundary:
-3. Failure handling and rollback:
+3. Failure handling and recovery:
 4. Regression and runtime evidence:
 
-## Check and review evidence
+### Coverage
 
-<!-- Use pending, passed, failed, or unavailable. Missing or stale evidence is unavailable, never passed. -->
+<!-- Record measured values and gate results, or explain why coverage is not applicable. -->
+
+- Total / changed-line / safety-controller coverage (if applicable):
+- Coverage gate results or exception:
+
+### Check and review evidence
+
+<!-- Use pending, passed, failed, or unavailable. Missing or stale evidence is unavailable. -->
 
 | Evidence | Status | Exact SHA or unavailable reason |
 |---|---|---|
@@ -115,31 +69,14 @@ Runtime verification details:
 | Session AI (`core` or `full`) |  |  |
 | Human ready/merge decision |  |  |
 
-- [ ] Every result above belongs to the exact head SHA recorded in this template.
-- [ ] Missing, stale, or unverifiable results are marked unavailable.
-- [ ] Every candidate finding has a terminal disposition before human-ready state.
+### Checklist
 
-## Rollout plan
+- [ ] Scope is one committed task; unrelated, sensitive, and scratch files are excluded.
+- [ ] Behavior matches approved requirements; needed documentation is updated.
+- [ ] Tests, coverage, and runtime checks have results or explained limits.
+- [ ] Compatibility, rollout, and rollback are documented.
+- [ ] Every result matches the current PR head; missing, stale, or unverifiable evidence is unavailable.
+- [ ] The PR stays draft until review and finding disposition are complete.
+- [ ] External activation and ready/merge each require separate human authorization.
 
-<!-- State what becomes active on merge, how it is verified, and any later activation boundary. -->
-
-- [ ] The rollout steps and post-change verification are concrete.
-- [ ] This pull request has no live activation, with an explanation below.
-
-Rollout steps or explanation:
-
-## Unavailable evidence
-
-<!-- Name unavailable checks, environments, hardware, accounts, or external owners and their impact. -->
-
-Unavailable evidence and resulting blocker or limitation:
-
-## Final review checklist
-
-- [ ] The pull request is limited to one coherent task group.
-- [ ] The implementation follows the approved requirements and design.
-- [ ] Failure behavior and operational risk were considered.
-- [ ] Documentation was updated where users or operators need it.
-- [ ] External activation or mutation has separate explicit authorization.
-- [ ] The pull request remains draft until integrated review is complete.
-- [ ] No secrets, credentials, logs, generated media, or scratch files were committed.
+</details>

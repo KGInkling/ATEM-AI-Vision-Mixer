@@ -526,17 +526,13 @@ jobs:
           verdict_upper=$(printf '%s' "$verdict" | tr '[:lower:]' '[:upper:]')
           summary=$(jq -r '.summary' <<<"$REVIEW_JSON")
           findings=$(jq -r '
-            if (.findings | length) == 0 then
-              "_None._"
-            else
-              .findings
-              | to_entries
-              | map(
-                  "\(.key + 1). **[\(.value.severity | ascii_upcase)] \(.value.title)**\n\n"
-                  + "   \(.value.path):\(.value.line) — \(.value.evidence)"
-                )
-              | join("\n\n")
-            end
+            .findings
+            | map(
+                "### [" + (.severity | ascii_upcase) + "] " + .title + "\n\n"
+                + "`" + .path + ":" + (.line | tostring) + "`\n\n"
+                + .evidence
+              )
+            | join("\n\n")
           ' <<<"$REVIEW_JSON")
           body=$(jq -nr \
             --arg findings "$findings" \
@@ -547,13 +543,15 @@ jobs:
             --arg verdict "$verdict_upper" \
             '
               $marker
-              + "\n## Manual Claude review\n\n"
+              + "\n## Claude review\n\n"
+              + "**Verdict: " + $verdict + "**\n\n"
+              + $summary + "\n\n"
+              + (if $findings == "" then "" else $findings + "\n\n" end)
+              + "<details>\n<summary>Review revision</summary>\n\n"
               + "- Reviewer: Claude Code\n"
               + "- Base SHA: " + $base_sha + "\n"
               + "- Reviewed SHA: " + $sha + "\n"
-              + "- Verdict: " + $verdict + "\n\n"
-              + $summary + "\n\n"
-              + "### Findings\n\n" + $findings
+              + "\n</details>"
             ')
 
           reviews_json=$(gh api --paginate --slurp "repos/$REPOSITORY/pulls/$PR_NUMBER/reviews")
