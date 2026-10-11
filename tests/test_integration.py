@@ -1,14 +1,19 @@
 """Safety and nonblocking checks across directors, controller, and switcher."""
 
+import json
+import sys
+import warnings
 from concurrent.futures import ThreadPoolExecutor
 from threading import Event
 from time import perf_counter, sleep
+from types import SimpleNamespace
 
 import pytest
 
 from atem_ai_vision_mixer.director import async_runner
 from atem_ai_vision_mixer.director.async_runner import AsyncRunner
-from atem_ai_vision_mixer.director.policy import DEFAULT_POLICY
+from atem_ai_vision_mixer.director.local_llm import LocalLLMDirector
+from atem_ai_vision_mixer.director.policy import DEFAULT_POLICY, CutTempo, ShotPolicy
 from atem_ai_vision_mixer.director.rules import RulesDirector
 from atem_ai_vision_mixer.execution.controller import (
     Action,
@@ -366,3 +371,383 @@ def test_close_is_nonblocking_idempotent_and_prevents_more_requests(
 def test_runner_requires_a_positive_finite_timeout(timeout):
     with pytest.raises(ValueError, match="positive and finite"):
         AsyncRunner(initial_result=DEFAULT_POLICY, timeout_seconds=timeout)
+
+
+@pytest.fixture
+def local_state():
+    """Give rules camera two while a model can validly suggest camera one."""
+    return WorldState.model_validate(
+        {
+            "timestamp": 10.0,
+            "program": {"live_camera": 1, "seconds_live": 0.0},
+            "audio": {"speaking": False, "pause_ms": 500, "level": 0.2},
+            "cameras": {
+                1: {
+                    "feed_healthy": True,
+                    "framing_score": 0.4,
+                    "subject_present": True,
+                    "motion_score": 0.0,
+                },
+                2: {
+                    "feed_healthy": True,
+                    "framing_score": 0.9,
+                    "subject_present": True,
+                    "motion_score": 0.0,
+                },
+            },
+        }
+    )
+
+
+@pytest.fixture
+def local_sdk(monkeypatch):
+    """Stub SDK/network calls while using the production worker and request builder."""
+    control = SimpleNamespace(configs=[], calls=[], answers=[], closed=0, headers=[])
+
+    class HTTPError(Exception):
+        pass
+
+    class ResponseError(Exception):
+        pass
+
+    class Client:
+        def __init__(self, **kwargs):
+            self.config = kwargs
+            control.configs.append(kwargs)
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *args):
+            control.closed += 1
+
+        def chat(self, **kwargs):
+            request = SimpleNamespace(headers={"authorization": "synthetic credential"})
+            for hook in self.config["event_hooks"]["request"]:
+                hook(request)
+            control.headers.append(dict(request.headers))
+            control.calls.append(kwargs)
+            answer = (
+                control.answers.pop(0)
+                if control.answers
+                else json.dumps(
+                    {
+                        "camera": kwargs["format"]["properties"]["camera"]["enum"][0],
+                        "confidence": 0.8,
+                        "reason": "shot_variety",
+                    }
+                )
+            )
+            if isinstance(answer, Exception):
+                raise answer
+            if callable(answer):
+                answer = answer()
+            return {"message": {"content": answer}}
+
+    control.HTTPError, control.ResponseError = HTTPError, ResponseError
+    monkeypatch.setitem(sys.modules, "httpx", SimpleNamespace(HTTPError=HTTPError))
+    monkeypatch.setitem(
+        sys.modules,
+        "ollama",
+        SimpleNamespace(Client=Client, ResponseError=ResponseError),
+    )
+    return control
+
+
+@pytest.fixture
+def local_director(local_sdk, submitted_requests):
+    director = LocalLLMDirector()
+    yield director
+    director.close()
+
+
+def test_local_request_is_bounded_loopback_schema_constrained_and_validated(
+    local_director, local_sdk, local_state, submitted_requests
+):
+    assert local_director.decide(local_state) == RulesDirector().decide(local_state)
+    submitted_requests[0].result(timeout=1)
+    intent = local_director.decide(local_state)
+    submitted_requests[1].result(timeout=1)
+
+    assert intent.camera == 1
+    request = local_sdk.calls[0]
+    assert request["model"] == "qwen3:4b"
+    assert request["format"]["properties"]["camera"]["enum"] == [1, 2]
+    assert request["options"] == {"temperature": 0, "num_predict": 128}
+    assert request["keep_alive"] == -1
+    assert request["stream"] is False and request["think"] is False
+    assert [m["role"] for m in request["messages"]] == ["system", "user"]
+    assert (
+        json.dumps(request["format"], sort_keys=True)
+        in request["messages"][0]["content"]
+    )
+    assert local_sdk.configs[0]["host"] == "http://127.0.0.1:11434"
+    assert local_sdk.configs[0]["timeout"] == 2.0
+    assert local_sdk.configs[0]["follow_redirects"] is False
+    assert local_sdk.configs[0]["trust_env"] is False
+    assert all("authorization" not in headers for headers in local_sdk.headers)
+    assert local_sdk.closed == 2
+
+
+def test_local_prompt_excludes_free_text_and_keeps_the_stable_prefix(
+    local_director, local_sdk, local_state, submitted_requests
+):
+    local_state.cameras[1].defects = [
+        "black",
+        "off_thirds",
+        "synthetic private metadata",
+    ]
+    local_director.policy = ShotPolicy.model_validate(
+        {
+            "segment": "sermon",
+            "preferred_shot": "tight",
+            "cut_tempo": "slow",
+            "rationale": "synthetic private rationale",
+        }
+    )
+    local_director.decide(local_state)
+    submitted_requests[0].result(timeout=1)
+    first = local_sdk.calls[0]["messages"]
+    payload = json.loads(first[1]["content"])
+    assert payload["policy"] == {
+        "segment": "sermon",
+        "preferred_shot": "tight",
+        "cut_tempo": "slow",
+    }
+    assert payload["world_state"]["cameras"]["1"]["defects"] == ["black", "off_thirds"]
+    assert "synthetic private" not in json.dumps(local_sdk.calls)
+
+    local_state.timestamp = 11.0
+    local_state.audio.speaking = True
+    local_director.policy = DEFAULT_POLICY
+    local_director.decide(local_state)
+    submitted_requests[1].result(timeout=1)
+    second = local_sdk.calls[1]["messages"]
+    assert first[0]["content"] == second[0]["content"]
+    assert first[1]["content"] != second[1]["content"]
+    assert list(json.loads(second[1]["content"])) == ["policy", "world_state"]
+
+
+@pytest.mark.parametrize(
+    "bad_response",
+    [
+        "not JSON",
+        '{"camera":999,"confidence":0.8,"reason":"hold"}',
+        '{"camera":true,"confidence":0.8,"reason":"hold"}',
+        '{"camera":1,"confidence":1.5,"reason":"hold"}',
+        '{"camera":1,"confidence":0.8,"reason":"invented"}',
+        '{"camera":1,"confidence":0.8,"reason":"hold","extra":"private"}',
+        None,
+    ],
+)
+def test_local_malformed_output_retains_the_previous_valid_intent(
+    bad_response, local_director, local_sdk, local_state, submitted_requests, caplog
+):
+    local_director.decide(local_state)
+    submitted_requests[0].result(timeout=1)
+    local_sdk.answers.append(bad_response)
+    previous = local_director.decide(local_state)
+    with pytest.raises(ValueError):
+        submitted_requests[1].result(timeout=1)
+
+    assert local_director.decide(local_state) == previous
+    submitted_requests[2].result(timeout=1)
+    assert bad_response is None or bad_response not in caplog.text
+
+
+@pytest.mark.parametrize("failure_kind", ["connection", "http", "response"])
+def test_local_outage_uses_current_rules_logs_once_and_recovers(
+    failure_kind, local_director, local_sdk, local_state, submitted_requests, caplog
+):
+    error_type = {
+        "connection": ConnectionError,
+        "http": local_sdk.HTTPError,
+        "response": local_sdk.ResponseError,
+    }[failure_kind]
+    local_sdk.answers.extend([error_type("private transport detail")] * 2)
+    local_director.decide(local_state)
+    submitted_requests[0].result(timeout=1)
+    assert local_director.decide(local_state) == RulesDirector().decide(local_state)
+    submitted_requests[1].result(timeout=1)
+    local_state.cameras[1].framing_score = 1.0
+    assert local_director.decide(local_state) == RulesDirector().decide(local_state)
+    submitted_requests[2].result(timeout=1)
+    assert len(caplog.records) == 1
+    assert "private transport detail" not in caplog.text
+    assert local_director.decide(local_state).camera == 1
+    submitted_requests[3].result(timeout=1)
+    assert len(caplog.records) == 1
+    local_sdk.answers.append(error_type("private second outage"))
+    local_director.decide(local_state)
+    submitted_requests[4].result(timeout=1)
+    assert local_director.decide(local_state) == RulesDirector().decide(local_state)
+    submitted_requests[5].result(timeout=1)
+    assert len(caplog.records) == 2
+    assert "private second outage" not in caplog.text
+
+
+def test_local_missing_sdk_remains_offline_with_rules(
+    local_director, monkeypatch, local_state, submitted_requests, caplog
+):
+    monkeypatch.setitem(sys.modules, "ollama", None)
+    local_director.decide(local_state)
+    submitted_requests[0].result(timeout=1)
+    assert local_director.decide(local_state) == RulesDirector().decide(local_state)
+    submitted_requests[1].result(timeout=1)
+    assert len(caplog.records) == 1
+
+
+def test_local_busy_request_keeps_a_snapshot_and_never_writes_switcher(
+    local_director, local_sdk, local_state, submitted_requests
+):
+    entered, release = Event(), Event()
+
+    def paused_response():
+        entered.set()
+        assert release.wait(2)
+        return '{"camera":1,"confidence":0.8,"reason":"hold"}'
+
+    local_sdk.answers.append(paused_response)
+    switcher = _switcher_for(local_state)
+    controller = Controller(switcher, mode=Mode.SHADOW)
+    try:
+        local_director.decide(local_state)
+        assert entered.wait(1)
+        local_state.timestamp = 20.0
+        local_state.cameras[1].defects.append("synthetic private later text")
+        local_director.policy = DEFAULT_POLICY.model_copy(
+            update={"cut_tempo": CutTempo.FAST}
+        )
+        start = perf_counter()
+        for _ in range(20):
+            intent = local_director.decide(local_state)
+            controller.tick(local_state, intent, now=local_state.timestamp)
+        assert perf_counter() - start < 0.1
+        assert len(local_sdk.calls) == len(submitted_requests) == 1
+        assert (
+            json.loads(local_sdk.calls[0]["messages"][1]["content"])["world_state"][
+                "timestamp"
+            ]
+            == 10.0
+        )
+        assert "synthetic private later text" not in json.dumps(local_sdk.calls)
+        assert switcher.writes == []
+    finally:
+        release.set()
+        submitted_requests[0].result(timeout=1)
+
+
+def test_local_drops_a_retained_intent_when_its_camera_disappears(
+    local_director, local_sdk, local_state, submitted_requests
+):
+    local_director.decide(local_state)
+    submitted_requests[0].result(timeout=1)
+    assert local_director.decide(local_state).camera == 1
+    submitted_requests[1].result(timeout=1)
+    del local_state.cameras[1]
+    local_sdk.answers.append('{"camera":2,"confidence":0.8,"reason":"hold"}')
+    assert local_director.decide(local_state) == RulesDirector().decide(local_state)
+    submitted_requests[2].result(timeout=1)
+    assert local_sdk.calls[2]["format"]["properties"]["camera"]["enum"] == [2]
+    assert local_director.decide(local_state).camera == 2
+    submitted_requests[3].result(timeout=1)
+
+
+def test_local_returns_detached_intents_and_does_not_mutate_inputs(
+    local_director, local_state, submitted_requests
+):
+    before = local_state.model_dump_json()
+    local_director.decide(local_state)
+    submitted_requests[0].result(timeout=1)
+    intent = local_director.decide(local_state)
+    submitted_requests[1].result(timeout=1)
+    intent.camera = 999
+    assert local_director.decide(local_state).camera == 1
+    submitted_requests[2].result(timeout=1)
+    assert local_state.model_dump_json() == before
+
+
+def test_local_empty_camera_set_skips_model_and_close_stops_more_calls(
+    local_director, local_sdk, local_state
+):
+    local_state.cameras.clear()
+    assert local_director.decide(local_state) == RulesDirector().decide(local_state)
+    assert local_sdk.calls == []
+    local_state.cameras[2] = WorldState.model_validate(
+        {
+            **local_state.model_dump(),
+            "cameras": {
+                2: {
+                    "feed_healthy": True,
+                    "framing_score": 0.4,
+                    "subject_present": True,
+                    "motion_score": 0.0,
+                }
+            },
+        }
+    ).cameras[2]
+    local_director.close()
+    with pytest.raises(RuntimeError, match="closed"):
+        local_director.decide(local_state)
+    assert local_sdk.calls == []
+
+
+def test_local_extra_observation_fields_cannot_enter_the_prompt(
+    local_director, local_sdk, local_state, submitted_requests
+):
+    class ExtendedState(WorldState):
+        speaker_name: str
+        transcript: str
+        raw_video: bytes
+
+    extended = ExtendedState.model_validate(
+        {
+            **local_state.model_dump(),
+            "speaker_name": "synthetic private name",
+            "transcript": "synthetic private transcript",
+            "raw_video": b"synthetic private pixel bytes",
+        }
+    )
+    local_director.decide(extended)
+    submitted_requests[0].result(timeout=1)
+    payload = json.loads(local_sdk.calls[0]["messages"][1]["content"])
+    assert set(payload["world_state"]) == {"timestamp", "program", "audio", "cameras"}
+    assert "synthetic private" not in json.dumps(local_sdk.calls)
+
+
+@pytest.mark.parametrize(
+    "value", ["synthetic private text", float("nan"), float("inf")]
+)
+def test_local_mutated_non_numeric_observation_is_rejected_before_sdk_use(
+    value, local_director, local_sdk, local_state
+):
+    local_state.audio.level = value
+    with warnings.catch_warnings(record=True) as captured, pytest.raises(ValueError):
+        local_director.decide(local_state)
+    assert captured == []
+    assert local_sdk.calls == []
+
+
+def test_local_expired_response_cannot_override_rules(
+    local_director, local_sdk, local_state, submitted_requests, request_clock
+):
+    entered, release = Event(), Event()
+
+    def expired_response():
+        entered.set()
+        assert release.wait(2)
+        return '{"camera":1,"confidence":0.8,"reason":"hold"}'
+
+    local_sdk.answers.append(expired_response)
+    try:
+        local_director.decide(local_state)
+        assert entered.wait(1)
+        request_clock["now"] = 20.0
+        release.set()
+        submitted_requests[0].result(timeout=1)
+        assert local_director.decide(local_state) == RulesDirector().decide(local_state)
+        submitted_requests[1].result(timeout=1)
+        assert local_director.decide(local_state).camera == 1
+        submitted_requests[2].result(timeout=1)
+    finally:
+        release.set()
