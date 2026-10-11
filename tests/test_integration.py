@@ -10,8 +10,9 @@ from types import SimpleNamespace
 
 import pytest
 
-from atem_ai_vision_mixer.director import async_runner
+from atem_ai_vision_mixer.director import async_runner, cloud_llm
 from atem_ai_vision_mixer.director.async_runner import AsyncRunner
+from atem_ai_vision_mixer.director.cloud_llm import CloudPolicyDirector
 from atem_ai_vision_mixer.director.local_llm import LocalLLMDirector
 from atem_ai_vision_mixer.director.policy import DEFAULT_POLICY, CutTempo, ShotPolicy
 from atem_ai_vision_mixer.director.rules import RulesDirector
@@ -371,6 +372,46 @@ def test_close_is_nonblocking_idempotent_and_prevents_more_requests(
 def test_runner_requires_a_positive_finite_timeout(timeout):
     with pytest.raises(ValueError, match="positive and finite"):
         AsyncRunner(initial_result=DEFAULT_POLICY, timeout_seconds=timeout)
+
+
+def test_poll_collects_results_without_submitting_more_requests(
+    make_runner, submitted_requests
+):
+    runner = make_runner()
+    assert runner.poll() == "previous"
+    assert submitted_requests == []
+    runner.tick(lambda: "completed")
+    submitted_requests[0].result(timeout=1)
+    for _ in range(3):
+        assert runner.poll() == "completed"
+    assert len(submitted_requests) == 1
+    runner.close()
+    with pytest.raises(RuntimeError, match="closed"):
+        runner.poll()
+
+
+def test_poll_retains_expired_result_without_queuing_a_retry(
+    make_runner, submitted_requests, request_clock
+):
+    runner = make_runner()
+    entered, release = Event(), Event()
+
+    def delayed():
+        entered.set()
+        assert release.wait(2)
+        return "expired"
+
+    try:
+        runner.tick(delayed)
+        assert entered.wait(1)
+        request_clock["now"] = 12.0
+        assert runner.poll() == "previous"
+        release.set()
+        submitted_requests[0].result(timeout=1)
+        assert runner.poll() == "previous"
+        assert len(submitted_requests) == 1
+    finally:
+        release.set()
 
 
 @pytest.fixture
@@ -751,3 +792,312 @@ def test_local_expired_response_cannot_override_rules(
         submitted_requests[2].result(timeout=1)
     finally:
         release.set()
+
+
+@pytest.fixture
+def cloud_sdk(monkeypatch):
+    """Stub AWS transport and parsed responses without credential discovery."""
+    control = SimpleNamespace(
+        configs=[], calls=[], http_configs=[], answers=[], closed=0
+    )
+
+    class Client:
+        def __init__(self, **kwargs):
+            self.kwargs = kwargs
+            control.http_configs.append(kwargs)
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *args):
+            control.closed += 1
+
+    class AnthropicBedrock:
+        def __init__(self, **kwargs):
+            control.configs.append(kwargs)
+            self.http_client = kwargs["http_client"]
+            self.messages = SimpleNamespace(parse=self.parse)
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *args):
+            pass
+
+        def parse(self, **kwargs):
+            control.calls.append(kwargs)
+            answer = (
+                control.answers.pop(0)
+                if control.answers
+                else '{"segment":"unknown","preferred_shot":"tight","cut_tempo":"slow","rationale":"Prefer clear framing."}'
+            )
+            if isinstance(answer, Exception):
+                raise answer
+            if callable(answer):
+                answer = answer()
+            response = SimpleNamespace(
+                status_code=200,
+                read=lambda: None,
+                json=lambda: {
+                    "usage": {
+                        "input_tokens": 50,
+                        "output_tokens": 30,
+                        "cache_read_input_tokens": 1024,
+                    },
+                    "content": [{"text": answer}],
+                },
+            )
+            for hook in self.http_client.kwargs["event_hooks"]["response"]:
+                hook(response)
+            return SimpleNamespace(
+                parsed_output=None
+                if answer is None
+                else kwargs["output_format"].model_validate_json(answer, strict=True)
+            )
+
+    monkeypatch.setitem(sys.modules, "httpx2", SimpleNamespace(Client=Client))
+    monkeypatch.setitem(
+        sys.modules, "anthropic", SimpleNamespace(AnthropicBedrock=AnthropicBedrock)
+    )
+    return control
+
+
+@pytest.fixture
+def cloud_director(cloud_sdk, submitted_requests, request_clock, monkeypatch):
+    monkeypatch.setattr(cloud_llm, "monotonic", lambda: request_clock["now"])
+    director = CloudPolicyDirector(
+        aws_region="us-east-1", inference_profile="us.anthropic.claude-sonnet-4-6"
+    )
+    yield director
+    director.close()
+
+
+def test_cloud_default_completed_policy_and_cadence_are_independent(
+    cloud_director, cloud_sdk, local_state, submitted_requests, request_clock, caplog
+):
+    caplog.set_level("INFO")
+    assert cloud_director.update(local_state) is DEFAULT_POLICY
+    submitted_requests[0].result(timeout=1)
+    policy = cloud_director.update(local_state)
+    assert policy.preferred_shot.value == "tight"
+    for now in (10.5, 20.0, 34.999):
+        request_clock["now"] = now
+        assert cloud_director.update(local_state) == policy
+    assert len(cloud_sdk.calls) == len(submitted_requests) == 1
+    request_clock["now"] = 35.0
+    cloud_director.update(local_state)
+    submitted_requests[1].result(timeout=1)
+    assert len(cloud_sdk.calls) == 2
+    assert "input=50 output=30 cache_read=1024" in caplog.text
+    request = cloud_sdk.calls[0]
+    assert request["model"] == "us.anthropic.claude-sonnet-4-6"
+    assert request["output_format"] is ShotPolicy
+    assert request["output_config"] == {"effort": "low"}
+    assert request["max_tokens"] == 1024
+    assert request["system"][-1]["cache_control"] == {"type": "ephemeral"}
+    assert cloud_sdk.configs[0]["max_retries"] == 0
+    assert cloud_sdk.configs[0]["aws_region"] == "us-east-1"
+    assert (
+        cloud_sdk.configs[0]["base_url"]
+        == "https://bedrock-runtime.us-east-1.amazonaws.com"
+    )
+    assert cloud_sdk.http_configs[0]["trust_env"] is False
+    assert cloud_sdk.http_configs[0]["follow_redirects"] is False
+    assert cloud_sdk.http_configs[0]["timeout"] == 10.0
+    assert cloud_sdk.closed == 2
+
+
+def test_cloud_prefix_is_stable_and_private_fields_are_not_forwarded(
+    cloud_director, cloud_sdk, local_state, submitted_requests, request_clock
+):
+    local_state.cameras[1].defects = ["soft", "synthetic private text"]
+    cloud_director.update(local_state)
+    submitted_requests[0].result(timeout=1)
+    first = cloud_sdk.calls[0]
+    local_state.timestamp = 22.0
+    local_state.audio.pause_ms = 800
+    request_clock["now"] = 35.0
+    cloud_director.update(local_state)
+    submitted_requests[1].result(timeout=1)
+    second = cloud_sdk.calls[1]
+    assert first["system"] == second["system"]
+    assert first["messages"] != second["messages"]
+    assert "synthetic private text" not in str(cloud_sdk.calls)
+    payload = json.loads(first["messages"][0]["content"])
+    assert payload["cameras"]["1"]["defects"] == ["soft"]
+
+
+@pytest.mark.parametrize(
+    "answer",
+    [
+        "not JSON",
+        '{"segment":"invented","preferred_shot":"wide","cut_tempo":"slow","rationale":"short"}',
+        '{"segment":"sermon","preferred_shot":"tight","cut_tempo":"slow","rationale":"'
+        + "a" * 241
+        + '"}',
+    ],
+)
+def test_cloud_validation_retains_policy_and_still_reports_numeric_usage(
+    answer,
+    cloud_director,
+    cloud_sdk,
+    local_state,
+    submitted_requests,
+    request_clock,
+    caplog,
+):
+    caplog.set_level("INFO")
+    cloud_director.update(local_state)
+    submitted_requests[0].result(timeout=1)
+    previous = cloud_director.update(local_state)
+    cloud_sdk.answers.append(answer)
+    request_clock["now"] = 35.0
+    cloud_director.update(local_state)
+    with pytest.raises(ValueError):
+        submitted_requests[1].result(timeout=1)
+    assert cloud_director.update(local_state) == previous
+    assert len(cloud_sdk.calls) == 2
+    assert sum("Cloud usage" in record.message for record in caplog.records) == 2
+    assert answer not in caplog.text
+
+
+def test_cloud_missing_sdk_retains_default_without_aws_access(
+    cloud_director, local_state, submitted_requests, monkeypatch
+):
+    monkeypatch.setitem(sys.modules, "anthropic", None)
+    assert cloud_director.update(local_state) is DEFAULT_POLICY
+    with pytest.raises(ImportError):
+        submitted_requests[0].result(timeout=1)
+    assert cloud_director.update(local_state) is DEFAULT_POLICY
+
+
+def test_cloud_slow_call_skips_requests_and_discards_expired_policy(
+    cloud_director, cloud_sdk, local_state, submitted_requests, request_clock
+):
+    entered, release = Event(), Event()
+
+    def slow():
+        entered.set()
+        assert release.wait(2)
+        return '{"segment":"sermon","preferred_shot":"tight","cut_tempo":"normal","rationale":"Late result."}'
+
+    cloud_sdk.answers.append(slow)
+    try:
+        assert cloud_director.update(local_state) is DEFAULT_POLICY
+        assert entered.wait(1)
+        request_clock["now"] = 35.0
+        start = perf_counter()
+        for _ in range(20):
+            assert cloud_director.update(local_state) is DEFAULT_POLICY
+        assert perf_counter() - start < 0.05
+        assert len(cloud_sdk.calls) == len(submitted_requests) == 1
+        release.set()
+        submitted_requests[0].result(timeout=1)
+        assert cloud_director.update(local_state) is DEFAULT_POLICY
+        assert len(cloud_sdk.calls) == 1
+    finally:
+        release.set()
+
+
+@pytest.mark.parametrize(
+    ("region", "profile", "interval"),
+    [
+        ("", "us.anthropic.claude-sonnet-4-6", 25),
+        ("us-east-1@invalid.example", "us.anthropic.claude-sonnet-4-6", 25),
+        ("us-east-1", "anthropic.claude-opus-5", 25),
+        ("us-east-1", "us.anthropic.claude-sonnet-4-6", 0),
+        ("us-east-1", "us.anthropic.claude-sonnet-4-6", float("nan")),
+    ],
+)
+def test_cloud_requires_explicit_supported_region_profile_and_slow_cadence(
+    region, profile, interval
+):
+    with pytest.raises(ValueError):
+        CloudPolicyDirector(
+            aws_region=region, inference_profile=profile, interval_seconds=interval
+        )
+
+
+@pytest.mark.parametrize("answer", [None, RuntimeError("synthetic credential failure")])
+def test_cloud_absent_policy_or_transport_failure_retains_default_and_recovers(
+    answer,
+    cloud_director,
+    cloud_sdk,
+    local_state,
+    submitted_requests,
+    request_clock,
+    caplog,
+):
+    cloud_sdk.answers.append(answer)
+    cloud_director.update(local_state)
+    with pytest.raises((ValueError, RuntimeError)):
+        submitted_requests[0].result(timeout=1)
+    assert cloud_director.update(local_state) is DEFAULT_POLICY
+    assert "synthetic credential failure" not in caplog.text
+    assert cloud_sdk.closed == 1
+    request_clock["now"] = 35.0
+    cloud_director.update(local_state)
+    submitted_requests[1].result(timeout=1)
+    assert cloud_director.update(local_state).preferred_shot.value == "tight"
+
+
+@pytest.mark.parametrize(
+    "body",
+    [
+        None,
+        {},
+        {"usage": []},
+        {"usage": {"input_tokens": -1, "output_tokens": 1}},
+        {"usage": {"input_tokens": True, "output_tokens": 1}},
+        ValueError("private response content"),
+    ],
+)
+def test_cloud_invalid_usage_never_logs_response_content(body, caplog):
+    caplog.set_level("INFO")
+
+    def response_json():
+        if isinstance(body, Exception):
+            raise body
+        return body
+
+    cloud_llm._log_usage(SimpleNamespace(read=lambda: None, json=response_json))
+    assert caplog.text == ""
+
+
+@pytest.mark.parametrize("cache_usage", [{}, {"cache_read_input_tokens": None}])
+def test_cloud_uncached_usage_logs_zero_reads(cache_usage, caplog):
+    caplog.set_level("INFO")
+    cloud_llm._log_usage(
+        SimpleNamespace(
+            read=lambda: None,
+            json=lambda: {
+                "usage": {"input_tokens": 50, "output_tokens": 30, **cache_usage}
+            },
+        )
+    )
+    assert "input=50 output=30 cache_read=0" in caplog.text
+
+
+def test_cloud_explicit_aws_profile_and_close(
+    cloud_sdk, submitted_requests, local_state
+):
+    director = CloudPolicyDirector(
+        aws_region="eu-west-1",
+        inference_profile="eu.anthropic.claude-sonnet-4-6",
+        aws_profile="offline-rehearsal",
+        interval_seconds=20,
+    )
+    try:
+        director.update(local_state)
+        submitted_requests[0].result(timeout=1)
+        assert cloud_sdk.configs[0]["aws_profile"] == "offline-rehearsal"
+        assert (
+            cloud_sdk.configs[0]["base_url"]
+            == "https://bedrock-runtime.eu-west-1.amazonaws.com"
+        )
+        assert cloud_sdk.calls[0]["model"] == "eu.anthropic.claude-sonnet-4-6"
+    finally:
+        director.close()
+    director.close()
+    with pytest.raises(RuntimeError, match="closed"):
+        director.update(local_state)

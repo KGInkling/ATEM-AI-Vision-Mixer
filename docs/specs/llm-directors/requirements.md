@@ -109,6 +109,11 @@ The cloud tier SHALL call Claude through AWS Bedrock.
 WHEN the Bedrock client is constructed
 THEN it SHALL be given an explicit AWS region, which is required.
 
+The cloud adapter SHALL use `AnthropicBedrock` on Bedrock Runtime with Sonnet 4.6
+and an explicitly selected supported inference profile. Opus 5 on Mantle does not
+support the required structured JSON output. Region and cross-region routing are
+operator choices, without an implicit default.
+
 Model identifiers on Bedrock carry a provider prefix and SHALL be written accordingly.
 
 WHEN AWS credentials are configured
@@ -128,6 +133,10 @@ or any per-request value.
 WHEN prompt caching is configured
 THEN an explicit cache breakpoint SHALL be placed on the last stable block, because Bedrock does
 not support automatic top-level cache control.
+
+Sonnet 4.6 requires at least 1,024 tokens before a cache checkpoint. An unchanged
+shorter prefix may return zero cache reads; the system SHALL NOT add filler merely
+to reach the cache threshold.
 
 ## Requirement 10: Cost is bounded and observable
 

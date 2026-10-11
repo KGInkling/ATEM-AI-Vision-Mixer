@@ -34,7 +34,9 @@ speaking/pause/level scalars, per-camera health/presence/scores, fixed known def
 codes, and the policy's segment/shot/tempo enums. It excludes raw frames, PCM,
 faces/landmarks/boxes, names, transcripts, unknown defect text, policy rationale,
 and extra observation fields. The explicit projection is validated before JSON
-serialization; invalid scalar mutations and nonfinite JSON values are rejected
+serialization by `director/prompt_context.py`, shared with the cloud adapter.
+This preserves the local request's fields and fixed defect vocabulary. Invalid
+scalar mutations and nonfinite JSON values are rejected
 before SDK use without data-bearing serializer warnings.
 
 The client targets `http://127.0.0.1:11434` explicitly. Environment host/proxy

@@ -11,16 +11,15 @@ controller:
 | **local** | every few seconds | `ShotIntent` | `ollama serve`, out-of-process | rules |
 | **cloud** | every 20–30 s | `ShotPolicy` | AWS Bedrock | last policy, then default |
 
-The division of labour is the important part. **Bedrock sets policy, the local model picks the
-shot, the controller decides when.** Bedrock is the only tier smart enough to notice "this is the
-sermon body, not the worship set — favour tight shots and cut only on strong pauses," and that
-judgement stays valid for tens of seconds. Asking it which camera to use *right now* would be
-paying frontier-model latency and cost for a decision that a 4B model makes adequately, 10×
-cheaper, with a fraction of the delay.
+**Bedrock sets policy, the local model picks the shot, the controller decides when.**
+The cloud adapter receives only anonymous observation scalars and fixed defect
+codes. These cannot establish a speaker, topic or service segment; its prompt
+requires `unknown` when the segment is not established. Whether cloud guidance
+improves shot quality is a later comparative evaluation, not an assumption.
 
-Calling Bedrock every tick would be roughly 720 calls per service. On the policy cadence it is
-closer to 120, for strictly better decisions — the slow tier is doing the thing it is actually
-good at.
+The default cloud cadence is 25 seconds, with a minimum configurable interval of
+20 seconds. An hour permits at most 144 requests at the default interval. Busy
+workers skip due attempts; retries are disabled, so failures cannot multiply calls.
 
 ### Why the LLM is advisory and not authoritative
 
@@ -66,6 +65,7 @@ New package `atem_ai_vision_mixer/director/` additions:
   `format=<ShotIntent schema>`, `temperature=0`, a `num_predict` cap, and `keep_alive=-1`.
 - `cloud_llm.py` — `CloudPolicyDirector`. Calls Bedrock, returns a `ShotPolicy`.
 - `async_runner.py` — the skip-if-busy wrapper both tiers use.
+- `prompt_context.py` — the shared explicit anonymous `WorldState` projection.
 - `layered.py` — `LayeredDirector` composing the three tiers behind the single `Director`
   protocol, so `app.py` sees one object.
 
@@ -95,39 +95,44 @@ machine uncomfortably close to swap, and swap is fatal to frame timing.
 ### Cloud tier configuration
 
 ```python
-from anthropic import AnthropicBedrockMantle
+from anthropic import AnthropicBedrock
 
-client = AnthropicBedrockMantle(
-    aws_region="us-east-1"
-)  # region is REQUIRED, no default
+client = AnthropicBedrock(
+    aws_region="us-east-1",
+    base_url="https://bedrock-runtime.us-east-1.amazonaws.com",
+    timeout=10.0,
+    max_retries=0,
+)  # illustrative explicit routing; adapter also disables proxies and redirects
 
-client.messages.create(
-    model="anthropic.claude-opus-5",  # Bedrock IDs carry the provider prefix
+client.messages.parse(
+    model="us.anthropic.claude-sonnet-4-6",  # operator-selected inference profile
     max_tokens=1024,
     system=[
         {
             "type": "text",
-            "text": SYSTEM_AND_SCHEMA,
+            "text": SYSTEM_PROMPT,
             "cache_control": {"type": "ephemeral"},
         }
     ],  # explicit — see below
-    output_config={
-        "format": {"type": "json_schema", "schema": ShotPolicy.model_json_schema()},
-        "effort": "low",
-    },
+    output_format=ShotPolicy,
+    output_config={"effort": "low"},
     messages=[{"role": "user", "content": world_state_summary}],
 )
 ```
 
-Four Bedrock-specific details that are easy to get wrong:
+The approved route uses Sonnet 4.6 on Bedrock Runtime. Explicit supported profile
+IDs are `us`, `eu`, `jp`, or `global` followed by `.anthropic.claude-sonnet-4-6`;
+availability and routing permission must be checked before a separately authorized
+live run. Mantle rejects `output_config.format`, and Opus 5 has no structured-output
+support. See [AWS structured outputs](https://docs.aws.amazon.com/bedrock/latest/userguide/structured-output.html)
+and the [Sonnet 4.6 model card](https://docs.aws.amazon.com/bedrock/latest/userguide/model-card-anthropic-claude-sonnet-4-6.html).
 
-1. **The model ID carries an `anthropic.` prefix on Bedrock.** The bare first-party ID returns an
-   error.
-2. **`aws_region` is required** — unlike some clients there is no default.
-3. **Bedrock does not support automatic top-level `cache_control`.** The explicit breakpoint on
-   the last system block is not optional here; without it nothing caches.
-4. **Batches, the Files API, and task budgets are unavailable on Bedrock.** None are needed, but
-   don't reach for them.
+`messages.parse(output_format=ShotPolicy)` transforms the schema into supported
+wire constraints and validates the result against the complete original model.
+Length bounds become descriptive hints on the wire but remain enforced locally.
+This uses Anthropic 1.13.0 or later within major version 1, with its HTTPX2 client.
+See [Anthropic structured outputs](https://platform.claude.com/docs/en/build-with-claude/structured-outputs).
+Do not implement a second schema transformer or relax `ShotPolicy` constraints.
 
 `effort: "low"` suits a director: this is a short structured judgement on a small input, not a
 reasoning marathon, and latency matters more than depth.
@@ -138,10 +143,25 @@ Order is `system + schema + few-shot` (stable, byte-identical every call) then `
 (volatile). Caching is a **prefix match** — a single changed byte anywhere in the prefix
 invalidates everything after it.
 
-The failure mode to avoid is putting anything per-request into the stable block: a timestamp, a
-service ID, a `datetime.now()` in a header. It looks harmless and silently reduces every call to
-a full-price cache miss. Verify by checking that `cache_read_input_tokens` is non-zero on the
-second and subsequent calls; if it is always zero, something in the prefix is varying.
+Per-request values must not enter the stable system block or output schema. The
+explicit ephemeral breakpoint goes on the last stable system block; there is no
+top-level automatic cache control on this route. Sonnet 4.6 needs at least 1,024
+tokens before a checkpoint. The compact current prompt may be shorter; zero
+cache reads can mean an ineligible prefix, expiry, or a changed prefix. Do not
+pad the prompt to manufacture cache hits. Verify actual returned token counts
+and eligibility in a separately authorized live checkpoint.
+
+The shared summary excludes raw media, face data, identities, transcripts, extra
+fields and arbitrary defect text. Numeric usage is logged from the HTTP response
+before policy parsing, so a malformed policy still records returned usage.
+Each invocation is logged without the request body, response text or credentials.
+
+`AsyncRunner.poll()` collects results each tick without submitting work.
+`CloudPolicyDirector.update()` calls `tick()` only when the slow cadence is due.
+It advances the cadence even when busy, retains default/previous policy on errors,
+and discards late results. The 10-second logical deadline and finite SDK I/O
+timeout are separate: I/O timeouts bound inactivity, and Python cannot cancel a
+running thread. `close()` stops new work without waiting for that thread.
 
 ### The skip-if-busy pattern
 

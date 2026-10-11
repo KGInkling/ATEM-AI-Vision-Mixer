@@ -165,13 +165,15 @@ real room isn't reachable.
 - **Local tier** — `ollama serve` out-of-process, output constrained by
   `ShotIntent.model_json_schema()` so it's guaranteed parseable, `temperature=0`,
   `keep_alive=-1`. ~4B model on 16 GB.
-- **Cloud tier** — AWS Bedrock, `AnthropicBedrockMantle`, model ID `anthropic.claude-opus-5`
-  (Bedrock IDs carry the `anthropic.` prefix). Structured outputs work; prompt caching works but
-  Bedrock has **no** automatic top-level `cache_control`, so put an explicit one on the last
-  system block.
-- **Cadence:** Bedrock sets *policy* every 20–30 s ("we're in the sermon body — favor tight
-  shots, cut only on strong pauses"), the local tier picks the *shot* every few seconds, the
-  deterministic controller decides *when*. ~5× cheaper than calling Bedrock every tick.
+- **Cloud tier** — AWS Bedrock Runtime, `AnthropicBedrock`, Sonnet 4.6 with an
+  explicit region and inference profile. `messages.parse(output_format=ShotPolicy)`
+  sends a supported schema and validates the original model. Opus 5/Mantle does
+  not support this structured-output contract. Use an explicit cache breakpoint
+  on the last stable system block; Sonnet 4.6 needs a 1,024-token prefix minimum.
+- **Cadence:** Bedrock sets advisory *policy* every 25 s by default (minimum 20 s),
+  the local tier picks the *shot* every few seconds, the controller decides *when*.
+  Anonymous observations cannot establish service topics; unknown segments remain
+  unknown. Comparative quality and live costs still require runtime evaluation.
 - Both tiers are advisory and **non-blocking**: fire async, keep the last decision, drop stale
   requests. A director two decisions behind is worse than no director.
 
