@@ -1,7 +1,14 @@
-"""End-to-end safety checks across scenarios, director, controller, and switcher."""
+"""Safety and nonblocking checks across directors, controller, and switcher."""
+
+from concurrent.futures import ThreadPoolExecutor
+from threading import Event
+from time import perf_counter, sleep
 
 import pytest
 
+from atem_ai_vision_mixer.director import async_runner
+from atem_ai_vision_mixer.director.async_runner import AsyncRunner
+from atem_ai_vision_mixer.director.policy import DEFAULT_POLICY
 from atem_ai_vision_mixer.director.rules import RulesDirector
 from atem_ai_vision_mixer.execution.controller import (
     Action,
@@ -150,3 +157,212 @@ def test_each_scenario_preserves_all_safety_properties_after_every_tick(
             commanded_cut_times,
             first_switcher,
         )
+
+
+@pytest.fixture
+def submitted_requests(monkeypatch):
+    """Observe real executor submissions and await them only in test cleanup."""
+    futures = []
+
+    class RecordingExecutor(ThreadPoolExecutor):
+        def submit(self, *args, **kwargs):
+            future = super().submit(*args, **kwargs)
+            futures.append(future)
+            return future
+
+    monkeypatch.setattr(async_runner, "ThreadPoolExecutor", RecordingExecutor)
+    return futures
+
+
+@pytest.fixture
+def make_runner():
+    """Close each runner after its bounded test request has been released."""
+    runners = []
+
+    def create(initial="previous", timeout=2.0):
+        runner = AsyncRunner(initial_result=initial, timeout_seconds=timeout)
+        runners.append(runner)
+        return runner
+
+    yield create
+    for runner in runners:
+        runner.close()
+
+
+@pytest.fixture
+def request_clock(monkeypatch):
+    """Control deadline ordering without making deadline tests sleep."""
+    clock = {"now": 10.0}
+    monkeypatch.setattr(async_runner, "monotonic", lambda: clock["now"])
+    return clock
+
+
+@pytest.mark.parametrize("delay", [0.1, 0.3])
+def test_model_delay_does_not_block_shadow_ticks_or_queue_requests(
+    delay, make_runner, submitted_requests
+):
+    state = load_scenario(scenario_names()[0])[0].state
+    initial = RulesDirector().decide(state)
+    switcher = _switcher_for(state)
+    controller = Controller(switcher, mode=Mode.SHADOW)
+    runner = make_runner(initial)
+    entered, release = Event(), Event()
+    called = []
+
+    def slow_model():
+        called.append("first")
+        entered.set()
+        sleep(delay)
+        assert release.wait(2)
+        return initial
+
+    def skipped_model():
+        called.append("skipped")
+        return initial
+
+    try:
+        start = perf_counter()
+        assert runner.tick(slow_model) is initial
+        launch_elapsed = perf_counter() - start
+        assert entered.wait(1)
+        elapsed = []
+        for _ in range(20):
+            start = perf_counter()
+            intent = runner.tick(skipped_model)
+            controller.tick(state, intent, now=state.timestamp)
+            elapsed.append(perf_counter() - start)
+            assert intent is initial
+        assert called == ["first"]
+        assert len(submitted_requests) == 1
+        assert switcher.writes == []
+        assert max(elapsed + [launch_elapsed]) < 0.05
+    finally:
+        release.set()
+        if submitted_requests:
+            submitted_requests[0].result(timeout=2)
+
+
+@pytest.mark.parametrize("initial", ["previous", DEFAULT_POLICY])
+def test_timely_result_is_accepted_even_when_polled_after_deadline(
+    initial, make_runner, submitted_requests, request_clock
+):
+    runner = make_runner(initial)
+    completed = object()
+    assert runner.tick(lambda: completed) is initial
+    submitted_requests[0].result(timeout=1)
+    request_clock["now"] = 20.0
+
+    assert runner.tick(lambda: initial) is completed
+    submitted_requests[1].result(timeout=1)
+
+
+def test_timeout_retains_result_skips_busy_calls_and_discards_late_completion(
+    make_runner, submitted_requests, request_clock, caplog
+):
+    runner = make_runner()
+    entered, release = Event(), Event()
+    skipped = Event()
+
+    def late_model():
+        entered.set()
+        assert release.wait(2)
+        return "expired"
+
+    def next_model():
+        skipped.set()
+        return "fresh"
+
+    try:
+        assert runner.tick(late_model) == "previous"
+        assert entered.wait(1)
+        request_clock["now"] = 12.0
+        for _ in range(3):
+            assert runner.tick(next_model) == "previous"
+        assert not skipped.is_set()
+        assert len(submitted_requests) == 1
+        assert len(caplog.records) == 1
+        release.set()
+        submitted_requests[0].result(timeout=1)
+
+        assert runner.tick(next_model) == "previous"
+        submitted_requests[1].result(timeout=1)
+        assert runner.tick(lambda: "next") == "fresh"
+        submitted_requests[2].result(timeout=1)
+        assert len(caplog.records) == 1
+    finally:
+        release.set()
+
+
+@pytest.mark.parametrize(("elapsed", "accepted"), [(1.999, True), (2.0, False)])
+def test_deadline_uses_completion_time_when_no_tick_observed_the_expiry(
+    elapsed, accepted, make_runner, submitted_requests, request_clock, caplog
+):
+    runner = make_runner()
+
+    def model():
+        request_clock["now"] = 10.0 + elapsed
+        return "completed"
+
+    runner.tick(model)
+    submitted_requests[0].result(timeout=1)
+    request_clock["now"] = 20.0
+
+    assert runner.tick(lambda: "next") == ("completed" if accepted else "previous")
+    submitted_requests[1].result(timeout=1)
+    assert len(caplog.records) == (0 if accepted else 1)
+
+
+def test_request_error_retains_previous_result_without_logging_response_content(
+    make_runner, submitted_requests, caplog
+):
+    runner = make_runner()
+
+    def malformed_model():
+        raise ValueError("synthetic private response sentinel")
+
+    runner.tick(malformed_model)
+    with pytest.raises(ValueError):
+        submitted_requests[0].result(timeout=1)
+
+    assert runner.tick(lambda: "recovered") == "previous"
+    submitted_requests[1].result(timeout=1)
+    assert "ValueError" in caplog.text
+    assert "synthetic private response sentinel" not in caplog.text
+    assert runner.tick(lambda: "next") == "recovered"
+    submitted_requests[2].result(timeout=1)
+
+
+@pytest.mark.parametrize("busy", [False, True])
+def test_close_is_nonblocking_idempotent_and_prevents_more_requests(
+    busy, make_runner, submitted_requests
+):
+    runner = make_runner()
+    entered, release = Event(), Event()
+
+    def model():
+        entered.set()
+        assert release.wait(2)
+        return "late"
+
+    try:
+        if busy:
+            runner.tick(model)
+            assert entered.wait(1)
+        start = perf_counter()
+        runner.close()
+        runner.close()
+        assert perf_counter() - start < 0.05
+        with pytest.raises(RuntimeError, match="closed"):
+            runner.tick(lambda: "forbidden")
+    finally:
+        release.set()
+        if submitted_requests:
+            submitted_requests[0].result(timeout=1)
+
+
+@pytest.mark.parametrize(
+    "timeout", [0.0, -1.0, float("nan"), float("inf"), -float("inf")]
+)
+def test_runner_requires_a_positive_finite_timeout(timeout):
+    with pytest.raises(ValueError, match="positive and finite"):
+        AsyncRunner(initial_result=DEFAULT_POLICY, timeout_seconds=timeout)
