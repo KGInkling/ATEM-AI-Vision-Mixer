@@ -67,7 +67,18 @@ New package `atem_ai_vision_mixer/director/` additions:
 - `async_runner.py` — the skip-if-busy wrapper both tiers use.
 - `prompt_context.py` — the shared explicit anonymous `WorldState` projection.
 - `layered.py` — `LayeredDirector` composing the three tiers behind the single `Director`
-  protocol, so `app.py` sees one object.
+  structural `decide(state) -> ShotIntent` interface, so `app.py` sees one object.
+  Both model tiers are explicit opt-ins; local defaults to three-second submission
+  with result polling every tick. The existing code has no separate `Director`
+  protocol type to extend.
+
+The local worker retains the policy actually used by each validated result.
+The layered director attributes fallback to `rules`, default-policy model advice
+to `local`, and model advice using a received cloud policy to `cloud_informed`.
+Newly arrived policy cannot relabel earlier local advice. `app.py` adds
+`director_tier` to its JSONL envelope; `controller.Decision`, the controller itself,
+and the app's returned `list[Decision]` remain unchanged. Strict JSONL readers must
+accept or strip this new metadata field.
 
 ### Local tier configuration
 

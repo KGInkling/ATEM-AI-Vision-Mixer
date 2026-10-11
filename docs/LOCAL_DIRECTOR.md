@@ -4,7 +4,8 @@
 has the same `decide(state) -> ShotIntent` interface as `RulesDirector`, and uses
 the existing `AsyncRunner` for one model request at a time. It supplies advice to
 the deterministic controller; it has no switcher reference or write capability.
-Application wiring and the layered decision cadence belong to later groups.
+Application wiring and submission cadence are provided by
+[the layered director](LAYERED_DIRECTOR.md).
 
 ## Model and request
 
@@ -87,7 +88,11 @@ finally:
 ```
 
 Replace `director.policy` from the control thread with a validated `ShotPolicy`
-when cloud guidance is available. The caller will set the local decision cadence.
+when cloud guidance is available. `decide(state, request_due=False)` collects
+completed advice without submitting a new request and still rechecks fallback
+and camera presence. Its default remains `request_due=True` for existing callers.
+`policy_used` exposes the immutable policy captured by returned model advice, or
+`None` for rules fallback; changing `policy` cannot relabel an older result.
 
 The existing integration owner tests request shape, private-field canaries,
 strict output/camera validation, retention, changed camera sets, outages/recovery,

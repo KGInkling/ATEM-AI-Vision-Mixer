@@ -95,7 +95,11 @@ controller change, stop and raise it.
   the fallback when anything above it is unavailable.
 - Record which tier produced each decision and include it in the `Decision` log (R11). Without
   this you cannot tell afterwards whether the models helped.
+  Use the app's JSONL envelope (`director_tier`), leaving `controller.Decision`
+  unchanged. Attribute the retained local result's actual request policy, never
+  merely the currently enabled tiers or newest cloud response.
 - Wire mode/config so each tier can be independently disabled.
+  Default both model tiers off; enabling cloud requires explicit region/profile.
 
 ## Task Group 8: Checkpoint
 

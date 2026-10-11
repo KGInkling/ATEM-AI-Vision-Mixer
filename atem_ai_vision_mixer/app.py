@@ -1,11 +1,12 @@
 """Run the offline mixer against a named scripted scenario."""
 
 import argparse
+import json
 import sys
 from collections.abc import Sequence
 from typing import TextIO
 
-from atem_ai_vision_mixer.director.rules import RulesDirector
+from atem_ai_vision_mixer.director.layered import LayeredDirector
 from atem_ai_vision_mixer.execution.controller import Controller, Decision, Mode
 from atem_ai_vision_mixer.execution.fake_switcher import FakeSwitcher
 from atem_ai_vision_mixer.scenarios import load_scenario, scenario_names
@@ -16,6 +17,12 @@ def run_scenario(
     scenario_name: str,
     mode: Mode | str = Mode.SHADOW,
     output: TextIO | None = None,
+    *,
+    local_enabled: bool = False,
+    cloud_enabled: bool = False,
+    aws_region: str | None = None,
+    inference_profile: str | None = None,
+    aws_profile: str | None = None,
 ) -> list[Decision]:
     """Replay one scenario and write each observable controller decision as JSONL."""
     scenario_steps = load_scenario(scenario_name)
@@ -24,28 +31,54 @@ def run_scenario(
         program=initial_state.program.live_camera,
         preview=_initial_preview_camera(initial_state),
     )
-    director = RulesDirector()
-    controller = Controller(switcher=switcher, mode=mode)
-    output_stream = output if output is not None else sys.stdout
-    decisions: list[Decision] = []
+    director = LayeredDirector(
+        local_enabled=local_enabled,
+        cloud_enabled=cloud_enabled,
+        aws_region=aws_region,
+        inference_profile=inference_profile,
+        aws_profile=aws_profile,
+    )
+    try:
+        controller = Controller(switcher=switcher, mode=mode)
+        output_stream = output if output is not None else sys.stdout
+        decisions: list[Decision] = []
 
-    for step in scenario_steps:
-        if step.operator_take_camera is not None:
-            switcher.simulate_operator_take(step.operator_take_camera)
+        for step in scenario_steps:
+            if step.operator_take_camera is not None:
+                switcher.simulate_operator_take(step.operator_take_camera)
 
-        shot_intent = director.decide(step.state)
-        decision = controller.tick(step.state, shot_intent, now=step.state.timestamp)
-        print(decision.model_dump_json(), file=output_stream)
-        decisions.append(decision)
+            shot_intent = director.decide(step.state)
+            decision = controller.tick(
+                step.state, shot_intent, now=step.state.timestamp
+            )
+            record = {
+                **decision.model_dump(mode="json"),
+                "director_tier": director.tier,
+            }
+            print(json.dumps(record, allow_nan=False), file=output_stream)
+            decisions.append(decision)
 
-    return decisions
+        return decisions
+    finally:
+        director.close()
 
 
 def main(argv: Sequence[str] | None = None) -> int:
     """Parse command-line choices and run the requested offline replay."""
     parser = _argument_parser()
     arguments = parser.parse_args(argv)
-    run_scenario(arguments.scenario, arguments.mode)
+    try:
+        run_scenario(
+            arguments.scenario,
+            arguments.mode,
+            local_enabled=arguments.enable_local,
+            cloud_enabled=arguments.enable_cloud,
+            aws_region=arguments.aws_region,
+            inference_profile=arguments.inference_profile,
+            aws_profile=arguments.aws_profile,
+        )
+    except ValueError as error:
+        parser.error(str(error))
     return 0
 
 
@@ -65,6 +98,19 @@ def _argument_parser() -> argparse.ArgumentParser:
         default=Mode.SHADOW.value,
         help="maximum switcher control level (default: shadow)",
     )
+    parser.add_argument(
+        "--enable-local", action="store_true", help="opt into local Ollama shot advice"
+    )
+    parser.add_argument(
+        "--enable-cloud",
+        action="store_true",
+        help="opt into Bedrock policy calls and cost",
+    )
+    parser.add_argument("--aws-region", help="explicit Bedrock source region")
+    parser.add_argument(
+        "--inference-profile", help="explicit Sonnet 4.6 routing profile"
+    )
+    parser.add_argument("--aws-profile", help="existing AWS credential profile")
     return parser
 
 

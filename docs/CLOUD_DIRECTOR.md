@@ -3,7 +3,8 @@
 `director/cloud_llm.py` implements LLM-directors task group 5.
 `CloudPolicyDirector.update(state) -> ShotPolicy` returns advisory strategic
 guidance. It selects no camera, owns no switcher, and does not change the
-controller. Layered application wiring belongs to the next implementation group.
+controller. [The layered director](LAYERED_DIRECTOR.md) connects policy to local
+advice behind explicit application opt-ins.
 
 ## Supported route and configuration
 

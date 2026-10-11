@@ -10,9 +10,11 @@ from types import SimpleNamespace
 
 import pytest
 
-from atem_ai_vision_mixer.director import async_runner, cloud_llm
+from atem_ai_vision_mixer.app import run_scenario
+from atem_ai_vision_mixer.director import async_runner, cloud_llm, layered
 from atem_ai_vision_mixer.director.async_runner import AsyncRunner
 from atem_ai_vision_mixer.director.cloud_llm import CloudPolicyDirector
+from atem_ai_vision_mixer.director.layered import LayeredDirector
 from atem_ai_vision_mixer.director.local_llm import LocalLLMDirector
 from atem_ai_vision_mixer.director.policy import DEFAULT_POLICY, CutTempo, ShotPolicy
 from atem_ai_vision_mixer.director.rules import RulesDirector
@@ -1101,3 +1103,283 @@ def test_cloud_explicit_aws_profile_and_close(
     director.close()
     with pytest.raises(RuntimeError, match="closed"):
         director.update(local_state)
+
+
+def test_local_poll_only_collects_actual_policy_without_starting_another_call(
+    local_director, local_sdk, local_state, submitted_requests
+):
+    assert local_director.decide(
+        local_state, request_due=False
+    ) == RulesDirector().decide(local_state)
+    assert submitted_requests == []
+    local_director.decide(local_state)
+    submitted_requests[0].result(timeout=1)
+    cloud_policy = DEFAULT_POLICY.model_copy(update={"rationale": "Cloud guidance."})
+    local_director.policy = cloud_policy
+    assert local_director.decide(local_state, request_due=False).camera == 1
+    assert local_director.policy_used is DEFAULT_POLICY
+    assert len(submitted_requests) == len(local_sdk.calls) == 1
+    local_director.decide(local_state)
+    submitted_requests[1].result(timeout=1)
+    assert local_director.decide(local_state, request_due=False).camera == 1
+    assert local_director.policy_used is cloud_policy
+    assert len(submitted_requests) == 2
+    del local_state.cameras[1]
+    assert local_director.decide(
+        local_state, request_due=False
+    ) == RulesDirector().decide(local_state)
+    assert local_director.policy_used is None
+
+
+def test_local_poll_only_outage_reports_rules_and_recovery_policy(
+    local_director, local_sdk, local_state, submitted_requests
+):
+    local_sdk.answers.append(local_sdk.HTTPError("synthetic private outage"))
+    local_director.decide(local_state)
+    submitted_requests[0].result(timeout=1)
+    assert local_director.decide(
+        local_state, request_due=False
+    ) == RulesDirector().decide(local_state)
+    assert local_director.policy_used is None
+    local_director.decide(local_state)
+    submitted_requests[1].result(timeout=1)
+    assert local_director.decide(local_state, request_due=False).camera == 1
+    assert local_director.policy_used is DEFAULT_POLICY
+
+
+@pytest.fixture
+def make_layered(local_sdk, cloud_sdk, submitted_requests, request_clock, monkeypatch):
+    monkeypatch.setattr(layered, "monotonic", lambda: request_clock["now"])
+    monkeypatch.setattr(cloud_llm, "monotonic", lambda: request_clock["now"])
+    directors = []
+
+    def create(**kwargs):
+        director = LayeredDirector(**kwargs)
+        directors.append(director)
+        return director
+
+    yield create
+    for director in directors:
+        director.close()
+
+
+def test_layered_defaults_to_rules_without_importing_or_constructing_model_sdks(
+    make_layered, local_sdk, cloud_sdk, local_state, submitted_requests, monkeypatch
+):
+    for module in ("anthropic", "ollama", "httpx", "httpx2"):
+        monkeypatch.setitem(sys.modules, module, None)
+    director = make_layered()
+    for _ in range(5):
+        assert director.decide(local_state) == RulesDirector().decide(local_state)
+        assert director.tier == "rules"
+    assert submitted_requests == local_sdk.configs == cloud_sdk.configs == []
+    director.close()
+    director.close()
+    with pytest.raises(RuntimeError, match="closed"):
+        director.decide(local_state)
+
+
+def test_layered_local_cadence_collects_between_submissions_and_rechecks_cameras(
+    make_layered, local_sdk, local_state, submitted_requests, request_clock
+):
+    director = make_layered(local_enabled=True)
+    assert director.decide(local_state) == RulesDirector().decide(local_state)
+    assert director.tier == "rules"
+    submitted_requests[0].result(timeout=1)
+    assert director.decide(local_state).camera == 1
+    assert director.tier == "local"
+    for now in (10.1, 12.999):
+        request_clock["now"] = now
+        assert director.decide(local_state).camera == 1
+    assert len(local_sdk.calls) == len(submitted_requests) == 1
+    del local_state.cameras[1]
+    assert director.decide(local_state).camera == 2
+    assert director.tier == "rules"
+    request_clock["now"] = 13.0
+    director.decide(local_state)
+    submitted_requests[1].result(timeout=1)
+    assert director.decide(local_state).camera == 2
+    assert director.tier == "local"
+    assert len(submitted_requests) == 2
+
+
+def test_layered_cloud_policy_informs_only_the_local_request_that_used_it(
+    make_layered, cloud_sdk, local_sdk, local_state, submitted_requests, request_clock
+):
+    director = make_layered(
+        local_enabled=True,
+        cloud_enabled=True,
+        aws_region="us-east-1",
+        inference_profile="us.anthropic.claude-sonnet-4-6",
+    )
+    director.decide(local_state)
+    assert director.tier == "rules"
+    for future in submitted_requests[:2]:
+        future.result(timeout=1)
+    # The first local request used DEFAULT_POLICY before cloud guidance arrived.
+    assert director.decide(local_state).camera == 1
+    assert director.tier == "local"
+    first = json.loads(local_sdk.calls[0]["messages"][1]["content"])
+    assert first["policy"]["preferred_shot"] == "wide"
+    request_clock["now"] = 13.0
+    director.decide(local_state)
+    submitted_requests[2].result(timeout=1)
+    second = json.loads(local_sdk.calls[1]["messages"][1]["content"])
+    assert second["policy"]["preferred_shot"] == "tight"
+    assert director.decide(local_state).camera == 1
+    assert director.tier == "cloud_informed"
+    assert len(cloud_sdk.calls) == 1
+
+
+def test_layered_cloud_and_local_can_be_disabled_independently(
+    make_layered, cloud_sdk, local_sdk, local_state, submitted_requests
+):
+    director = make_layered(
+        cloud_enabled=True,
+        aws_region="us-east-1",
+        inference_profile="us.anthropic.claude-sonnet-4-6",
+    )
+    assert director.decide(local_state) == RulesDirector().decide(local_state)
+    submitted_requests[0].result(timeout=1)
+    assert director.decide(local_state) == RulesDirector().decide(local_state)
+    assert director.tier == "rules"
+    assert len(cloud_sdk.calls) == 1
+    assert local_sdk.calls == []
+
+
+def test_layered_model_outages_recover_without_relabeling_rules(
+    make_layered,
+    local_sdk,
+    cloud_sdk,
+    local_state,
+    submitted_requests,
+    request_clock,
+    caplog,
+):
+    local_sdk.answers.append(local_sdk.HTTPError("private local failure"))
+    cloud_sdk.answers.append(RuntimeError("private cloud failure"))
+    director = make_layered(
+        local_enabled=True,
+        cloud_enabled=True,
+        aws_region="us-east-1",
+        inference_profile="us.anthropic.claude-sonnet-4-6",
+    )
+    director.decide(local_state)
+    with pytest.raises(RuntimeError):
+        submitted_requests[0].result(timeout=1)
+    submitted_requests[1].result(timeout=1)
+    assert director.decide(local_state) == RulesDirector().decide(local_state)
+    assert director.tier == "rules"
+    assert "private" not in caplog.text
+    request_clock["now"] = 13.0
+    director.decide(local_state)
+    submitted_requests[2].result(timeout=1)
+    director.decide(local_state)
+    assert director.tier == "local"
+
+
+def test_layered_slow_local_keeps_control_ticks_nonblocking_without_queue(
+    make_layered, local_sdk, local_state, submitted_requests, request_clock
+):
+    entered, release = Event(), Event()
+
+    def slow():
+        entered.set()
+        assert release.wait(2)
+        return '{"camera":1,"confidence":0.8,"reason":"hold"}'
+
+    local_sdk.answers.append(slow)
+    director = make_layered(local_enabled=True)
+    try:
+        director.decide(local_state)
+        assert entered.wait(1)
+        request_clock["now"] = 13.0
+        switcher = _switcher_for(local_state)
+        controller = Controller(switcher, mode=Mode.SHADOW)
+        start = perf_counter()
+        for _ in range(20):
+            controller.tick(
+                local_state, director.decide(local_state), now=local_state.timestamp
+            )
+        assert perf_counter() - start < 0.05
+        assert len(submitted_requests) == len(local_sdk.calls) == 1
+        assert switcher.writes == []
+        release.set()
+        submitted_requests[0].result(timeout=1)
+        assert director.decide(local_state) == RulesDirector().decide(local_state)
+        assert director.tier == "rules"
+        assert len(submitted_requests) == 1
+    finally:
+        release.set()
+
+
+@pytest.mark.parametrize(
+    "kwargs",
+    [
+        {"local_interval_seconds": 0},
+        {"local_interval_seconds": float("inf")},
+        {"cloud_enabled": True},
+        {"cloud_enabled": True, "aws_region": "us-east-1"},
+    ],
+)
+def test_layered_rejects_invalid_configuration_before_submitting_requests(
+    kwargs, submitted_requests
+):
+    with pytest.raises(ValueError):
+        LayeredDirector(**kwargs)
+    assert submitted_requests == []
+
+
+def test_layered_enabled_models_missing_sdks_still_run_the_whole_app_on_rules(
+    make_layered, submitted_requests, monkeypatch
+):
+    from io import StringIO
+
+    for module in ("anthropic", "ollama", "httpx", "httpx2"):
+        monkeypatch.setitem(sys.modules, module, None)
+    output = StringIO()
+    decisions = run_scenario(
+        "sermon",
+        output=output,
+        local_enabled=True,
+        cloud_enabled=True,
+        aws_region="us-east-1",
+        inference_profile="us.anthropic.claude-sonnet-4-6",
+    )
+    records = [json.loads(line) for line in output.getvalue().splitlines()]
+    assert len(decisions) == len(load_scenario("sermon"))
+    assert {record["director_tier"] for record in records} == {"rules"}
+    assert {record["effective_mode"] for record in records} == {"shadow"}
+    assert len(submitted_requests) == 2
+
+
+@pytest.mark.parametrize(
+    "enabled", [(False, False), (True, False), (False, True), (True, True)]
+)
+def test_layered_directors_never_call_any_switcher_method(
+    enabled, make_layered, local_state, submitted_requests, monkeypatch
+):
+    def forbidden(*args, **kwargs):
+        raise AssertionError("Director must not use a switcher")
+
+    for name in (
+        "program_input",
+        "preview_input",
+        "in_transition",
+        "set_preview",
+        "cut",
+        "auto",
+        "simulate_operator_take",
+    ):
+        monkeypatch.setattr(FakeSwitcher, name, forbidden)
+    local_enabled, cloud_enabled = enabled
+    director = make_layered(
+        local_enabled=local_enabled,
+        cloud_enabled=cloud_enabled,
+        aws_region="us-east-1",
+        inference_profile="us.anthropic.claude-sonnet-4-6",
+    )
+    assert director.decide(local_state).camera in local_state.cameras
+    for future in submitted_requests:
+        future.result(timeout=1)
+    assert director.decide(local_state).camera in local_state.cameras
