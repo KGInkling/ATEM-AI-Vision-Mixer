@@ -19,7 +19,7 @@ perception = [
   "onnxruntime",
   "opencv-contrib-python",
 ]
-llm = ["anthropic[bedrock]", "ollama"]
+llm = ["anthropic[bedrock]>=1.13.0,<2", "ollama"]
 dev = ["coverage", "diff-cover", "pytest", "pytest-cov", "ruff"]
 capture = ["av"]
 

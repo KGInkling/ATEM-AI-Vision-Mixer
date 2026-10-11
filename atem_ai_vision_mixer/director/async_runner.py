@@ -42,6 +42,17 @@ class AsyncRunner(Generic[Result]):
 
     def tick(self, request: Callable[[], Result]) -> Result:
         """Return the last result, starting a request only when the worker is idle."""
+        self.poll()
+        if self._future is not None:
+            return self._last_result
+
+        self._started_at = monotonic()
+        self._deadline_reported = False
+        self._future = self._executor.submit(_run_request, request)
+        return self._last_result
+
+    def poll(self) -> Result:
+        """Collect a completed result or deadline without starting another request."""
         if self._closed:
             raise RuntimeError("AsyncRunner is closed")
 
@@ -55,9 +66,6 @@ class AsyncRunner(Generic[Result]):
             self._consume_result(self._future)
             self._future = None
 
-        self._started_at = monotonic()
-        self._deadline_reported = False
-        self._future = self._executor.submit(_run_request, request)
         return self._last_result
 
     def _consume_result(self, future: Future[tuple[float, Result]]) -> None:

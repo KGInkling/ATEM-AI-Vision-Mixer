@@ -58,19 +58,26 @@ controller change, stop and raise it.
 ## Task Group 5: Cloud tier (R8, R9, R10)
 
 - `director/cloud_llm.py`: `CloudPolicyDirector` returning a `ShotPolicy`.
-- Client: `AnthropicBedrockMantle(aws_region=...)`. The region is **required** — there is no
-  default.
-- Model ID: **`anthropic.claude-opus-5`**. Bedrock IDs carry the provider prefix; the bare
-  first-party ID errors.
-- Structured output via `output_config={"format": {"type": "json_schema", "schema": ...}}` with
-  `"effort": "low"`.
+- Client: `AnthropicBedrock` on an explicit region's Bedrock Runtime endpoint,
+  with finite I/O timeout, no SDK retries, no environment proxies or redirects.
+- Model: Sonnet 4.6 with an operator-selected `us`, `eu`, `jp`, or `global`
+  inference profile (`<prefix>.anthropic.claude-sonnet-4-6`). No default routing.
+- Structured output via `messages.parse(output_format=ShotPolicy)` with
+  `output_config={"effort": "low"}`. The SDK transforms unsupported wire length
+  bounds and validates the complete original policy. Opus 5/Mantle cannot meet
+  this contract; see the corrected design and official references.
 - ⚠️ **Put an explicit `cache_control` breakpoint on the last system block.** Bedrock does not
   support automatic top-level cache control, so without this nothing caches and every call is
   full price.
 - ⚠️ The stable prefix must be **byte-identical** between calls. No timestamps, no UUIDs, no
-  service IDs in the system block. This bug is silent — it just makes everything cost 10× more.
-- Do not reach for Batches, the Files API, or task budgets; none are available on Bedrock.
-- Log input, output, and **cache-read** token counts per call (R10).
+  service IDs in the system block.
+- Sonnet 4.6 has a 1,024-token minimum at the cache checkpoint. Zero cache reads
+  alone do not prove prefix instability; do not add filler to reach the threshold.
+- Reuse the shared anonymous observation projection used by the local tier.
+- Poll completed policies every tick; submit on a 25-second default cadence
+  (minimum 20 seconds), skip busy attempts, retain previous/default on failures.
+- Log each invocation plus numeric input, output, and **cache-read** token counts
+  before policy validation (R10). Never log model payloads or credentials.
 
 ## Task Group 6: Checkpoint
 
@@ -123,8 +130,9 @@ This is the group that answers whether the spec was worth building.
 
 - A real run against a live `ollama serve` and real Bedrock credentials, in **`shadow` mode**.
 - Capture the decision log with tier attribution and the token-usage report.
-- Confirm `cache_read_input_tokens` is non-zero after the first call. If it is always zero, the
-  stable prefix is varying — find it before merging.
+- Inspect returned cache reads and prefix eligibility. Sonnet 4.6 needs at least
+  1,024 prefix tokens; zero reads can indicate a short prefix, expiry or instability.
+  Confirm nonzero reads only when the prefix is eligible and still cached.
 
 ## Task Group 13: Submit for review
 

@@ -6,7 +6,7 @@ finite timeout in seconds. A request is a no-argument function that returns a
 validated result: the future local client will return `ShotIntent`, and the cloud
 client will return `ShotPolicy`.
 
-The runner uses one standard-library executor worker. Call `tick()` and `close()`
+The runner uses one standard-library executor worker. Call `tick()`, `poll()` and `close()`
 from the control thread. Model calls run in the worker; only the control thread
 publishes results. No model SDK, credential, hardware, or event loop is needed to
 use the wrapper. Model clients and application wiring belong to later groups.
@@ -26,6 +26,10 @@ use the wrapper. Model clients and application wiring belong to later groups.
 The deadline uses monotonic elapsed time, independently of recorded frame PTS.
 The caller must validate output inside the request function before returning it.
 The generic runner does not parse or partially accept a model response.
+
+`poll()` applies the same completion/deadline rules without starting a request.
+The cloud adapter uses it every tick to collect timely policies independently of
+its slow submission cadence. Polling an idle runner submits no worker task.
 
 ## Timeouts and cleanup
 

@@ -39,6 +39,9 @@ request deadlines, retained results, and cleanup requirements.
 See [Local Ollama shot suggestions](docs/LOCAL_DIRECTOR.md) for schema-constrained
 advice, safe prompt data, and rules fallback when the local model is unavailable.
 
+See [Bedrock policy guidance](docs/CLOUD_DIRECTOR.md) for the Sonnet 4.6 adapter,
+explicit AWS routing, slow cadence, policy retention, and offline validation.
+
 ## Emergency main-branch access
 
 Normal changes must reach `main` through a pull request. The `main-protection` ruleset has no
