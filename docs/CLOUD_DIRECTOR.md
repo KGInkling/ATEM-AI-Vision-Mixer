@@ -71,6 +71,11 @@ the exception type. Policies are immutable. Every actual invocation has a log
 entry; numeric input/output/cache-read counts are logged before policy validation,
 so invalid policies do not hide returned usage. Response text is never logged.
 
+The CLI enables the cloud adapter's INFO records when `--enable-cloud` is selected;
+attempts and usage go to stderr, separate from stdout decision JSONL. Library
+callers configure their own handlers and levels. See
+[cost-log capture and the requirement map](DIRECTOR_VERIFICATION.md).
+
 The default logical deadline is 10 seconds, with the same finite I/O timeout.
 I/O timeouts bound inactivity rather than total wall time. The shared runner
 discards late responses but keeps the occupied slot until the call physically

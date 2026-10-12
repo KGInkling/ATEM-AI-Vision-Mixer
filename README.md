@@ -45,6 +45,9 @@ explicit AWS routing, slow cadence, policy retention, and offline validation.
 See [Layered camera advice](docs/LAYERED_DIRECTOR.md) for application model opt-ins,
 independent tier cadences, accurate decision attribution, and offline defaults.
 
+See [Director verification](docs/DIRECTOR_VERIFICATION.md) for the R1–R13 test map,
+controller safety matrix, cost-log capture, and remaining live-model checkpoints.
+
 ## Emergency main-branch access
 
 Normal changes must reach `main` through a pull request. The `main-protection` ruleset has no
