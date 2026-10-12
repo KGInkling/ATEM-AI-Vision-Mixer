@@ -42,6 +42,9 @@ advice, safe prompt data, and rules fallback when the local model is unavailable
 See [Bedrock policy guidance](docs/CLOUD_DIRECTOR.md) for the Sonnet 4.6 adapter,
 explicit AWS routing, slow cadence, policy retention, and offline validation.
 
+See [Layered camera advice](docs/LAYERED_DIRECTOR.md) for application model opt-ins,
+independent tier cadences, accurate decision attribution, and offline defaults.
+
 ## Emergency main-branch access
 
 Normal changes must reach `main` through a pull request. The `main-protection` ruleset has no

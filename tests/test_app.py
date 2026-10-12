@@ -2,10 +2,13 @@
 
 import json
 from io import StringIO
+from types import SimpleNamespace
 
 import pytest
 
+from atem_ai_vision_mixer import app
 from atem_ai_vision_mixer.app import main, run_scenario
+from atem_ai_vision_mixer.director.rules import RulesDirector
 from atem_ai_vision_mixer.execution.controller import Action, Mode
 from atem_ai_vision_mixer.scenarios import load_scenario
 
@@ -19,13 +22,17 @@ def test_run_scenario_prints_one_json_decision_per_step() -> None:
 
     assert len(decisions) == len(load_scenario("sermon"))
     assert len(records) == len(decisions)
-    assert records[0] == decisions[0].model_dump(mode="json")
+    assert records[0] == {
+        **decisions[0].model_dump(mode="json"),
+        "director_tier": "rules",
+    }
     assert set(records[0]) == {
         "action",
         "camera",
         "reason",
         "effective_mode",
         "timestamp",
+        "director_tier",
     }
 
 
@@ -86,3 +93,114 @@ def test_never_pauses_never_promotes_its_staged_shot() -> None:
 
     assert any(decision.action is Action.STAGE for decision in decisions)
     assert all(decision.action is not Action.CUT for decision in decisions)
+
+
+@pytest.fixture
+def app_director(monkeypatch):
+    control = SimpleNamespace(
+        configs=[], closed=0, tiers=["rules", "local", "cloud_informed"], seen=[]
+    )
+
+    class Director:
+        def __init__(self, **kwargs):
+            control.configs.append(kwargs)
+            self.tier = "rules"
+
+        def decide(self, state):
+            self.tier = control.tiers[min(len(control.seen), len(control.tiers) - 1)]
+            control.seen.append(state)
+            return RulesDirector().decide(state)
+
+        def close(self):
+            control.closed += 1
+
+    monkeypatch.setattr(app, "LayeredDirector", Director)
+    return control
+
+
+def test_cli_explicit_model_flags_preserve_shadow_and_pass_explicit_aws_routing(
+    app_director, capsys
+):
+    assert (
+        main(
+            [
+                "--scenario",
+                "sermon",
+                "--enable-local",
+                "--enable-cloud",
+                "--aws-region",
+                "us-east-1",
+                "--inference-profile",
+                "us.anthropic.claude-sonnet-4-6",
+                "--aws-profile",
+                "rehearsal",
+            ]
+        )
+        == 0
+    )
+    records = [json.loads(line) for line in capsys.readouterr().out.splitlines()]
+    assert app_director.configs == [
+        {
+            "local_enabled": True,
+            "cloud_enabled": True,
+            "aws_region": "us-east-1",
+            "inference_profile": "us.anthropic.claude-sonnet-4-6",
+            "aws_profile": "rehearsal",
+        }
+    ]
+    assert {record["effective_mode"] for record in records} == {"shadow"}
+    assert [record["director_tier"] for record in records[:3]] == [
+        "rules",
+        "local",
+        "cloud_informed",
+    ]
+    assert app_director.closed == 1
+
+
+def test_cli_omitted_model_flags_constructs_only_disabled_tiers(app_director, capsys):
+    main(["--scenario", "sermon"])
+    capsys.readouterr()
+    assert app_director.configs == [
+        {
+            "local_enabled": False,
+            "cloud_enabled": False,
+            "aws_region": None,
+            "inference_profile": None,
+            "aws_profile": None,
+        }
+    ]
+    assert app_director.closed == 1
+
+
+@pytest.mark.parametrize(
+    "flags",
+    [
+        ["--enable-cloud"],
+        ["--enable-cloud", "--aws-region", "us-east-1"],
+        ["--enable-cloud", "--inference-profile", "us.anthropic.claude-sonnet-4-6"],
+        [
+            "--enable-cloud",
+            "--aws-region",
+            "us-east-1",
+            "--inference-profile",
+            "unsupported",
+        ],
+    ],
+)
+def test_cli_invalid_cloud_configuration_fails_before_model_calls(flags, capsys):
+    with pytest.raises(SystemExit) as error:
+        main(["--scenario", "sermon", *flags])
+    assert error.value.code == 2
+    captured = capsys.readouterr()
+    assert captured.out == ""
+    assert "error:" in captured.err
+
+
+def test_run_scenario_closes_models_when_jsonl_output_fails(app_director):
+    class BrokenOutput:
+        def write(self, text):
+            raise OSError("Output unavailable")
+
+    with pytest.raises(OSError, match="Output unavailable"):
+        run_scenario("sermon", output=BrokenOutput())
+    assert app_director.closed == 1

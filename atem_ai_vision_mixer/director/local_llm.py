@@ -29,6 +29,7 @@ logger = logging.getLogger(__name__)
 class _LocalResult:
     intent: ShotIntent | None = None
     unavailable: bool = False
+    policy: ShotPolicy | None = None
 
 
 def _remove_authorization(request) -> None:
@@ -71,7 +72,7 @@ class LocalLLMDirector:
     """Suggest shots from a local model while preserving rules and controller safety.
 
     Use decide, policy replacement and close from the control thread. The caller
-    sets decision cadence; layered application scheduling is a later task group.
+    controls submissions with request_due; policy_used identifies returned advice.
     """
 
     def __init__(
@@ -82,6 +83,7 @@ class LocalLLMDirector:
     ) -> None:
         """Use the default policy and finite deadlines without loading a model SDK."""
         self.policy = policy
+        self.policy_used: ShotPolicy | None = None
         self._timeout_seconds = timeout_seconds
         self._rules = RulesDirector()
         self._runner = AsyncRunner(
@@ -89,14 +91,18 @@ class LocalLLMDirector:
         )
         self._reported_unavailable = False
 
-    def decide(self, state: WorldState) -> ShotIntent:
+    def decide(self, state: WorldState, *, request_due: bool = True) -> ShotIntent:
         """Return advice whose camera is still present, or current rules instead."""
+        self.policy_used = None
         fallback = self._rules.decide(state)
         if not state.cameras:
             return fallback
 
-        arguments = _request_arguments(state, self.policy)
-        result = self._runner.tick(partial(self._request, arguments))
+        if request_due:
+            arguments = _request_arguments(state, self.policy)
+            result = self._runner.tick(partial(self._request, arguments, self.policy))
+        else:
+            result = self._runner.poll()
         if result.unavailable:
             if not self._reported_unavailable:
                 logger.warning("Local Ollama unavailable; using rules.")
@@ -106,10 +112,12 @@ class LocalLLMDirector:
         self._reported_unavailable = False
         if result.intent is None or result.intent.camera not in state.cameras:
             return fallback
+        # Attribute retained advice to its request, not a newer policy setting.
+        self.policy_used = result.policy
         # ShotIntent is mutable; caller edits must not corrupt the retained result.
         return result.intent.model_copy()
 
-    def _request(self, arguments: dict) -> _LocalResult:
+    def _request(self, arguments: dict, policy: ShotPolicy) -> _LocalResult:
         try:
             import httpx
             import ollama
@@ -133,7 +141,7 @@ class LocalLLMDirector:
         )
         if intent.camera not in arguments["format"]["properties"]["camera"]["enum"]:
             raise ValueError("Model selected a camera outside the request schema")
-        return _LocalResult(intent=intent)
+        return _LocalResult(intent=intent, policy=policy)
 
     def close(self) -> None:
         """Stop accepting model calls without waiting for an occupied worker."""
