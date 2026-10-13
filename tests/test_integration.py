@@ -32,6 +32,7 @@ from atem_ai_vision_mixer.scenarios import (
     scenario_names,
 )
 from atem_ai_vision_mixer.world_state import WorldState
+from tools import evaluate_directors as evaluation
 
 # Rate limits are defined over an inclusive trailing minute.
 TRAILING_MINUTE_SECONDS = 60.0
@@ -1497,3 +1498,336 @@ def test_rules_hold_with_no_usable_camera_remains_fail_closed(
     )
     assert decision.action is Action.HOLD
     assert switcher.writes == []
+
+
+def test_recorded_evaluation_defaults_to_offline_rules_and_unassessed_quality(
+    monkeypatch,
+):
+    from pathlib import Path
+
+    for module in ("anthropic", "ollama", "httpx", "httpx2"):
+        monkeypatch.setitem(sys.modules, module, None)
+    result = evaluation.compare_recording(
+        Path(__file__).parent / "golden" / "perception.jsonl"
+    )
+    assert result["snapshots"] == 20
+    assert result["span_seconds"] == pytest.approx(1.9)
+    assert len(result["input_sha256"]) == 64
+    assert set(result["runs"]) == {"rules"}
+    assert result["runs"]["rules"]["cuts"] == []
+    assert result["runs"]["rules"]["model_evidence"] == "not_requested"
+    assert result["quality"] == "unassessed"
+    assert result["differences"] == {}
+
+
+def test_recorded_evaluation_simulates_program_and_dwell_without_mutating_input(
+    tmp_path,
+):
+    states = [step.state for step in load_scenario("sermon")]
+    for state in states:
+        state.program.live_camera = 1
+        state.program.seconds_live = 12.0 + state.timestamp
+    path = tmp_path / "states.jsonl"
+    path.write_text("\n".join(state.model_dump_json() for state in states) + "\n")
+    before = path.read_bytes()
+    result = evaluation.compare_recording(path)
+    assert [
+        (cut["recorded_timestamp"], cut["camera"])
+        for cut in result["runs"]["rules"]["cuts"]
+    ] == [(3.4, 2), (12.5, 3)]
+    assert path.read_bytes() == before
+    assert result["runs"]["rules"]["tier_counts"] == {"rules": len(states)}
+
+
+@pytest.mark.parametrize(
+    "rows",
+    [
+        [],
+        ["synthetic private invalid JSON"],
+        ['{"timestamp":"synthetic private timestamp"}'],
+        [load_scenario("sermon")[0].state.model_dump_json()] * 2,
+    ],
+)
+def test_recorded_evaluation_rejects_invalid_input_without_private_error_text(
+    rows, tmp_path
+):
+    path = tmp_path / "bad.jsonl"
+    path.write_text("\n".join(rows))
+    with pytest.raises(ValueError) as error:
+        evaluation.compare_recording(path)
+    assert "synthetic private" not in str(error.value)
+
+
+def test_recorded_evaluation_input_projection_removes_private_extras(tmp_path):
+    state = load_scenario("sermon")[0].state.model_dump(mode="json")
+    state["transcript"] = "synthetic private transcript"
+    state["cameras"]["1"]["defects"] = ["soft", "synthetic private defect"]
+    path = tmp_path / "private.jsonl"
+    path.write_text(json.dumps(state) + "\n")
+    states, digest = evaluation.load_recording(path)
+    assert "synthetic private" not in states[0].model_dump_json()
+    assert states[0].cameras[1].defects == ["soft"]
+    assert len(digest) == 64
+
+
+def test_recorded_evaluation_compares_three_real_adapter_paths_with_stubbed_outputs(
+    tmp_path, make_layered, submitted_requests, request_clock, monkeypatch
+):
+    path = tmp_path / "sermon.jsonl"
+    path.write_text(
+        "\n".join(step.state.model_dump_json() for step in load_scenario("sermon"))
+        + "\n"
+    )
+    monkeypatch.setattr(evaluation, "monotonic", lambda: request_clock["now"])
+
+    def advance(seconds):
+        for future in submitted_requests:
+            future.result(timeout=1)
+        request_clock["now"] += seconds
+
+    monkeypatch.setattr(evaluation, "sleep", advance)
+    result = evaluation.compare_recording(
+        path,
+        local_enabled=True,
+        cloud_enabled=True,
+        aws_region="us-east-1",
+        inference_profile="us.anthropic.claude-sonnet-4-6",
+    )
+    assert set(result["runs"]) == {"rules", "local", "cloud_informed"}
+    assert result["runs"]["local"]["model_evidence"] == "valid_advice"
+    assert result["runs"]["cloud_informed"]["model_evidence"] == "valid_advice"
+    assert result["runs"]["rules"]["cuts"]
+    assert result["runs"]["local"]["cuts"] == []
+    assert (
+        result["differences"]["local"]["only_rules"] == result["runs"]["rules"]["cuts"]
+    )
+    assert result["differences"]["local"]["only_variant"] == []
+    assert result["quality"] == "unassessed"
+    for future in submitted_requests:
+        future.result(timeout=1)
+
+
+def test_recorded_evaluation_missing_sdks_does_not_claim_a_valid_model_comparison(
+    tmp_path, make_layered, request_clock, submitted_requests, monkeypatch
+):
+    for module in ("anthropic", "ollama", "httpx", "httpx2"):
+        monkeypatch.setitem(sys.modules, module, None)
+    path = tmp_path / "states.jsonl"
+    path.write_text(
+        "\n".join(step.state.model_dump_json() for step in load_scenario("sermon"))
+        + "\n"
+    )
+    monkeypatch.setattr(evaluation, "monotonic", lambda: request_clock["now"])
+
+    def advance(seconds):
+        for future in submitted_requests:
+            future.result(timeout=1)
+        request_clock["now"] += seconds
+
+    monkeypatch.setattr(evaluation, "sleep", advance)
+    result = evaluation.compare_recording(path, local_enabled=True)
+    assert result["runs"]["local"]["model_evidence"] == "no_valid_advice"
+    assert result["quality"] == "unassessed"
+    for future in submitted_requests:
+        future.result(timeout=1)
+
+
+@pytest.mark.parametrize(
+    "kwargs",
+    [
+        {"cloud_enabled": True},
+        {"local_enabled": True, "cloud_enabled": True},
+        {
+            "local_enabled": True,
+            "cloud_enabled": True,
+            "aws_region": "us-east-1",
+            "inference_profile": "unsupported",
+        },
+    ],
+)
+def test_recorded_evaluation_bad_cloud_configuration_precedes_any_model_submission(
+    kwargs, tmp_path, submitted_requests
+):
+    path = tmp_path / "states.jsonl"
+    path.write_text(load_scenario("sermon")[0].state.model_dump_json() + "\n")
+    with pytest.raises(ValueError):
+        evaluation.compare_recording(path, **kwargs)
+    assert submitted_requests == []
+
+
+def test_recorded_evaluation_preserves_stale_veto_and_closes_on_failure(
+    local_state, request_clock, monkeypatch
+):
+    monkeypatch.setattr(evaluation, "monotonic", lambda: request_clock["now"])
+    monkeypatch.setattr(
+        evaluation,
+        "sleep",
+        lambda seconds: request_clock.update(now=request_clock["now"] + seconds),
+    )
+
+    class SlowDirector:
+        tier = "rules"
+        closed = False
+
+        def decide(self, state):
+            request_clock["now"] += 1
+            return RulesDirector().decide(state)
+
+        def close(self):
+            self.closed = True
+
+    states = (
+        local_state,
+        local_state.model_copy(update={"timestamp": local_state.timestamp + 0.1}),
+    )
+    director = SlowDirector()
+    report = evaluation.replay(states, director, paced=True)
+    assert report["stale_snapshots"] == 2
+    assert director.closed
+    broken = SlowDirector()
+    monkeypatch.setattr(
+        broken,
+        "decide",
+        lambda state: (_ for _ in ()).throw(RuntimeError("stub failure")),
+    )
+    with pytest.raises(RuntimeError, match="stub failure"):
+        evaluation.replay(states, broken, paced=False)
+    assert broken.closed
+
+
+@pytest.mark.parametrize(
+    ("field", "value"),
+    [
+        ("timestamp", float("nan")),
+        ("timestamp", float("inf")),
+        ("level", float("inf")),
+        ("seconds_live", -1),
+    ],
+)
+def test_recorded_evaluation_rejects_nonfinite_scalars_and_invalid_initial_dwell(
+    field, value, tmp_path
+):
+    state = load_scenario("sermon")[0].state.model_dump(mode="json")
+    target = (
+        state
+        if field == "timestamp"
+        else state["audio"]
+        if field == "level"
+        else state["program"]
+    )
+    target[field] = value
+    path = tmp_path / "bad.jsonl"
+    path.write_text(json.dumps(state))
+    with pytest.raises(ValueError):
+        evaluation.load_recording(path)
+
+
+def test_recorded_evaluation_cli_outputs_json_and_masks_input_errors(tmp_path, capsys):
+    from pathlib import Path
+
+    path = Path(__file__).parent / "golden" / "perception.jsonl"
+    assert evaluation.main([str(path)]) == 0
+    assert json.loads(capsys.readouterr().out)["quality"] == "unassessed"
+    bad = tmp_path / "bad.jsonl"
+    bad.write_text("synthetic private invalid row")
+    with pytest.raises(SystemExit) as error:
+        evaluation.main([str(bad)])
+    assert error.value.code == 2
+    assert "synthetic private" not in capsys.readouterr().err
+    with pytest.raises(SystemExit):
+        evaluation.main([str(tmp_path / "missing-private-filename.jsonl")])
+    assert "missing-private-filename" not in capsys.readouterr().err
+
+
+@pytest.mark.parametrize("different", [False, True])
+def test_recorded_cut_diff_aligns_snapshot_camera_and_ignores_tier_and_clock_jitter(
+    different, tmp_path, request_clock, monkeypatch
+):
+    path = tmp_path / "states.jsonl"
+    path.write_text(
+        "\n".join(step.state.model_dump_json() for step in load_scenario("sermon"))
+        + "\n"
+    )
+    monkeypatch.setattr(evaluation, "monotonic", lambda: request_clock["now"])
+    monkeypatch.setattr(
+        evaluation,
+        "sleep",
+        lambda seconds: request_clock.update(now=request_clock["now"] + seconds),
+    )
+
+    class Advice:
+        def __init__(self, **kwargs):
+            self.model = kwargs["local_enabled"]
+            self.tier = "local" if self.model else "rules"
+
+        def decide(self, state):
+            intent = RulesDirector().decide(state)
+            if self.model and different:
+                intent.camera = 3
+            return intent
+
+        def close(self):
+            pass
+
+    monkeypatch.setattr(evaluation, "LayeredDirector", Advice)
+    result = evaluation.compare_recording(path, local_enabled=True)
+    diff = result["differences"]["local"]
+    if different:
+        assert diff["only_rules"]
+        assert diff["only_variant"]
+    else:
+        assert diff["matching_cuts"] == len(result["runs"]["rules"]["cuts"]) == 2
+        assert diff["only_rules"] == diff["only_variant"] == []
+
+
+def test_recorded_evaluation_cli_opt_ins_and_blank_lines_use_only_stubbed_models(
+    tmp_path, make_layered, request_clock, submitted_requests, monkeypatch, capsys
+):
+    from pathlib import Path
+
+    path = tmp_path / "states.jsonl"
+    golden = Path(__file__).parent / "golden" / "perception.jsonl"
+    path.write_text("\n" + golden.read_text() + "\n")
+    monkeypatch.setattr(evaluation, "monotonic", lambda: request_clock["now"])
+
+    def advance(seconds):
+        for future in submitted_requests:
+            future.result(timeout=1)
+        request_clock["now"] += seconds
+
+    monkeypatch.setattr(evaluation, "sleep", advance)
+    assert (
+        evaluation.main(
+            [
+                str(path),
+                "--enable-local",
+                "--enable-cloud",
+                "--aws-region",
+                "us-east-1",
+                "--inference-profile",
+                "us.anthropic.claude-sonnet-4-6",
+            ]
+        )
+        == 0
+    )
+    report = json.loads(capsys.readouterr().out)
+    assert set(report["runs"]) == {"rules", "local", "cloud_informed"}
+    assert report["snapshots"] == 20
+    assert report["runs"]["cloud_informed"]["model_evidence"] == "no_valid_advice"
+    assert report["quality"] == "unassessed"
+    for future in submitted_requests:
+        future.result(timeout=1)
+
+
+@pytest.mark.parametrize("duration", [0.0, 1e308])
+def test_recorded_evaluation_rejects_overflowing_timeline_before_calls(
+    duration, tmp_path
+):
+    first = load_scenario("sermon")[0].state
+    first.timestamp = -1e308
+    first.program.seconds_live = duration
+    second = first.model_copy(update={"timestamp": 1e308 if duration == 0 else -1e307})
+    path = tmp_path / "bad-time.jsonl"
+    path.write_text(first.model_dump_json() + "\n" + second.model_dump_json() + "\n")
+    with pytest.raises(ValueError):
+        evaluation.load_recording(path)
