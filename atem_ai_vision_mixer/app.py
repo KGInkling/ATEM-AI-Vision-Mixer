@@ -2,6 +2,7 @@
 
 import argparse
 import json
+import logging
 import sys
 from collections.abc import Sequence
 from typing import TextIO
@@ -67,6 +68,11 @@ def main(argv: Sequence[str] | None = None) -> int:
     """Parse command-line choices and run the requested offline replay."""
     parser = _argument_parser()
     arguments = parser.parse_args(argv)
+    if arguments.enable_cloud:
+        logging.basicConfig()
+        logging.getLogger("atem_ai_vision_mixer.director.cloud_llm").setLevel(
+            logging.INFO
+        )
     try:
         run_scenario(
             arguments.scenario,

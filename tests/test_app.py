@@ -1,6 +1,7 @@
 """Tests for the runnable offline scenario application."""
 
 import json
+import logging
 from io import StringIO
 from types import SimpleNamespace
 
@@ -204,3 +205,52 @@ def test_run_scenario_closes_models_when_jsonl_output_fails(app_director):
     with pytest.raises(OSError, match="Output unavailable"):
         run_scenario("sermon", output=BrokenOutput())
     assert app_director.closed == 1
+
+
+@pytest.fixture
+def fresh_logging(monkeypatch):
+    """Use a fresh CLI stderr sink and restore the caller's logging configuration."""
+    root = logging.getLogger()
+    monkeypatch.setattr(root, "handlers", [])
+    monkeypatch.setattr(root, "level", logging.WARNING)
+    for name in ("atem_ai_vision_mixer.director.cloud_llm", "httpx2"):
+        monkeypatch.setattr(logging.getLogger(name), "level", logging.NOTSET)
+    yield
+    for handler in root.handlers:
+        handler.close()
+
+
+@pytest.mark.parametrize("cloud_enabled", [False, True])
+def test_cli_cloud_usage_is_visible_without_vendor_info_or_jsonl_contamination(
+    cloud_enabled, fresh_logging, monkeypatch, capsys
+):
+    # Pytest installs call-phase capture handlers after fixture setup.
+    monkeypatch.setattr(logging.getLogger(), "handlers", [])
+
+    def replay(*args, **kwargs):
+        logger = logging.getLogger("atem_ai_vision_mixer.director.cloud_llm")
+        logger.info("Cloud policy request started.")
+        logger.info("Cloud usage input=50 output=30 cache_read=0")
+        logging.getLogger("httpx2").info("private vendor informational canary")
+        print('{"director_tier":"rules"}')
+        return []
+
+    monkeypatch.setattr(app, "run_scenario", replay)
+    arguments = ["--scenario", "sermon"]
+    if cloud_enabled:
+        arguments += [
+            "--enable-cloud",
+            "--aws-region",
+            "us-east-1",
+            "--inference-profile",
+            "us.anthropic.claude-sonnet-4-6",
+        ]
+    assert main(arguments) == 0
+    captured = capsys.readouterr()
+    assert captured.out == '{"director_tier":"rules"}\n'
+    assert "private vendor" not in captured.err
+    if cloud_enabled:
+        assert "Cloud policy request started." in captured.err
+        assert "Cloud usage input=50 output=30 cache_read=0" in captured.err
+    else:
+        assert captured.err == ""

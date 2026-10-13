@@ -1383,3 +1383,117 @@ def test_layered_directors_never_call_any_switcher_method(
     for future in submitted_requests:
         future.result(timeout=1)
     assert director.decide(local_state).camera in local_state.cameras
+
+
+@pytest.mark.parametrize("scenario_name", scenario_names())
+@pytest.mark.parametrize("configuration", ["rules", "local", "cloud_informed"])
+def test_each_director_configuration_preserves_safety_for_every_scenario_tick(
+    scenario_name,
+    configuration,
+    make_layered,
+    local_sdk,
+    submitted_requests,
+    request_clock,
+):
+    director = make_layered(
+        local_enabled=configuration != "rules",
+        cloud_enabled=configuration == "cloud_informed",
+        aws_region="us-east-1",
+        inference_profile="us.anthropic.claude-sonnet-4-6",
+    )
+    steps = load_scenario(scenario_name)
+    # Deliberately challenge the live shot; the failed-feed case targets that bad feed.
+    local_sdk.answers.extend(
+        [
+            json.dumps(
+                {
+                    "camera": 1 if scenario_name == "camera_fails" else 2,
+                    "confidence": 0.9,
+                    "reason": "better_framing",
+                }
+            )
+        ]
+        * len(steps)
+    )
+    switcher = _switcher_for(steps[0].state)
+    shadow_switcher = _switcher_for(steps[0].state)
+    config = ControllerConfig()
+    controller = Controller(switcher, config=config, mode=Mode.AUTO)
+    shadow = Controller(shadow_switcher, mode=Mode.SHADOW)
+    commanded_cut_times = []
+    tiers = set()
+    decisions = []
+    awaited = 0
+    for step in steps:
+        request_clock["now"] = 10.0 + step.state.timestamp
+        _apply_operator_take(step, (switcher, shadow_switcher))
+        director.decide(step.state)
+        # Wait only in the test harness, then poll at this same deterministic tick.
+        for future in submitted_requests[awaited:]:
+            future.result(timeout=1)
+        awaited = len(submitted_requests)
+        intent = director.decide(step.state)
+        assert intent.camera in step.state.cameras
+        tiers.add(director.tier)
+        decision = controller.tick(step.state, intent, now=step.state.timestamp)
+        decisions.append(decision)
+        _assert_auto_safety_properties(
+            decision, step.state, config, commanded_cut_times, switcher
+        )
+        shadow.tick(step.state, intent, now=step.state.timestamp)
+        assert shadow_switcher.writes == []
+    assert configuration in tiers
+    if scenario_name == "camera_fails" and configuration != "rules":
+        assert any(decision.reason == "unhealthy_target" for decision in decisions)
+    if scenario_name == "never_pauses":
+        assert any(decision.action is Action.STAGE for decision in decisions)
+        assert all(decision.action is not Action.CUT for decision in decisions)
+
+
+def test_cloud_hour_of_ticks_bounds_requests_and_reports_each_attempt_usage(
+    cloud_director, cloud_sdk, local_state, submitted_requests, request_clock, caplog
+):
+    caplog.set_level("INFO")
+    for elapsed in range(3600):
+        request_clock["now"] = 10.0 + elapsed
+        cloud_director.update(local_state)
+        if elapsed % 25 == 0:
+            submitted_requests[-1].result(timeout=1)
+    assert len(cloud_sdk.calls) == len(submitted_requests) == 144
+    assert (
+        sum(
+            record.message == "Cloud policy request started."
+            for record in caplog.records
+        )
+        == 144
+    )
+    assert (
+        sum(
+            record.message == "Cloud usage input=50 output=30 cache_read=1024"
+            for record in caplog.records
+        )
+        == 144
+    )
+
+
+@pytest.mark.parametrize("empty_cameras", [False, True])
+def test_rules_hold_with_no_usable_camera_remains_fail_closed(
+    empty_cameras, make_layered, local_state
+):
+    local_state.program.live_camera = 99
+    if empty_cameras:
+        local_state.cameras.clear()
+    else:
+        for camera in local_state.cameras.values():
+            camera.feed_healthy = False
+    director = make_layered()
+    intent = director.decide(local_state)
+    assert intent == RulesDirector().decide(local_state)
+    assert intent.camera == 99
+    assert director.tier == "rules"
+    switcher = _switcher_for(local_state)
+    decision = Controller(switcher, mode=Mode.AUTO).tick(
+        local_state, intent, now=local_state.timestamp
+    )
+    assert decision.action is Action.HOLD
+    assert switcher.writes == []
